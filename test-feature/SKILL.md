@@ -57,7 +57,18 @@ select:mcp__claude-in-chrome__gif_creator
 3. Start a GIF recording with `mcp__claude-in-chrome__gif_creator` (pass the fresh `tabId`). Name the file after the feature (e.g. `test_user_filter.gif`). Capture extra frames at the start and end for smooth playback.
 4. Navigate to the dev server URL (or the specific route where the feature lives, if known from the diff).
 
-**If a browser action returns `Permission denied by user` or a stale/invalid-tab error:** don't repeat the same call. Re-run `tabs_context_mcp`, create a NEW tab with `tabs_create_mcp`, and retry the action on that fresh tab id (once). If it still fails, the extension's site access for the dev host is off — ask the user to re-enable it (extension icon → site access, or `chrome://extensions` → Claude → "On all sites") and stop; do not loop.
+**If a browser action returns `Permission denied by user` or a stale/invalid-tab error:** don't repeat the same call. Re-run `tabs_context_mcp`, create a NEW tab with `tabs_create_mcp`, and retry the action on that fresh tab id (once).
+
+#### `Permission denied by user` on navigate — often MISLEADING, retry first
+
+This error is **known to be misleading and frequently transient**. It does **not** reliably mean the user actually denied anything, nor that extension site access is off — the *same* `navigate` call often just **succeeds on a later retry with no change on the user's side** (observed 2026-07-26: denied twice, then went through on the next attempt with nothing granted).
+
+So treat a denial as "try again", not "the user must fix their settings":
+
+1. **Retry the navigation a few times** (2–4), each on a **fresh tab** via `tabs_context_mcp` + `tabs_create_mcp`. Space the attempts out (e.g. across turns) rather than firing the identical call back-to-back. This alone clears most cases.
+2. **Do not** immediately tell the user to change extension permissions — that was the wrong first move; leading with retries is right.
+3. Only if it **persists across several fresh-tab retries** may you mention, as a *possible* cause, that the Claude Chrome extension's site access could be off for that origin (site access is per origin *and* port, so `:5173` ≠ `:5200`) — they can check via the extension icon → site access, or `chrome://extensions` → Claude → Site access. Frame it as "possibly, the message is often misleading", and still retry after.
+4. If it never succeeds after all that, stop and report — don't keep looping `navigate` in a tight cycle.
 
 ### 5. Exercise the feature
 
