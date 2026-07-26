@@ -92,21 +92,21 @@ Use these tools as needed:
 
 Stop the GIF recording (`gif_creator` action `stop_recording`). This freezes the captured frames but doesn't produce a file yet — export happens in the next step, targeted at wherever the GIF needs to land.
 
-### 7. Export the GIF and post it to the PR (or fall back to Linear)
+### 7. Export the GIF, then upload to Linear (default) or the PR (public repos only)
 
 Export with `gif_creator` `action: "export"`, `download: true`, and a descriptive `filename` (e.g. `test_user_filter.gif`). This saves the GIF to `~/Downloads/<filename>.gif` — no further browser interaction needed.
 
-GitHub has no public API for uploading a binary straight into a PR comment (the paste/drag-drop upload web UI uses an internal, session-only endpoint). Instead, host the GIF in the **same repo** on a dedicated orphan branch (`test-recordings`) via git plumbing — this never touches the working tree, index, or current branch, so it's safe to run regardless of uncommitted work — then link it with a `raw.githubusercontent.com` URL pinned to that commit. This keeps the recording under the repo's normal access control (private repo → private GIF) without polluting the PR branch's own history.
+**Linear is the default target.** GitHub has no public API for uploading a binary straight into a PR comment — the paste/drag-drop upload in the web UI hits an internal, session-only endpoint that `gh`/`git` can't reach. A `raw.githubusercontent.com` link pinned to a commit *looks* like a workaround, but only actually renders for **public** repos: for private repos that domain requires an `Authorization` header on every request, which a viewer's browser never sends just from being logged into github.com (verified: 404 without a token, 200 with one) — so the image would show as broken to anyone opening the PR. The only URLs that render inline for a private repo without extra auth are the ones GitHub itself issues through its authenticated upload flow (browser drag-drop or the internal API), neither of which is available here.
 
-1. Check whether a PR exists for the current branch:
+1. Check whether a PR exists **and** whether the repo is public:
    ```bash
-   gh pr view --json number,url 2>/dev/null
+   PR_NUMBER=$(gh pr view --json number -q .number 2>/dev/null)
+   IS_PRIVATE=$(gh repo view --json isPrivate -q .isPrivate 2>/dev/null)
    ```
 
-2. **If a PR exists**, publish the GIF via plumbing commands (no checkout, no `git add`, nothing touches the current branch):
+2. **If a PR exists and the repo is public** (`IS_PRIVATE` = `false`), publish the GIF via plumbing commands to a dedicated `test-recordings` branch (no checkout, no `git add`, nothing touches the current branch) and link it with a raw URL — this only works because public raw URLs don't require auth:
    ```bash
    GIF_PATH=~/Downloads/<filename>.gif
-   PR_NUMBER=$(gh pr view --json number -q .number)
    OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
    BRANCH=test-recordings
    SLUG="pr${PR_NUMBER}-$(date +%Y%m%d-%H%M%S)-<feature-slug>.gif"
@@ -131,9 +131,7 @@ GitHub has no public API for uploading a binary straight into a PR comment (the 
    ```
    Confirm the comment posted (`gh pr view --json comments` or the URL `gh pr comment` prints) and note it for the report.
 
-3. **If the push or comment fails** (no push access, branch protection, etc.): fall back to the Linear path below.
-
-4. **If no PR exists:** upload to Linear:
+3. **In every other case — private repo, push failure, or no PR — upload to Linear:**
    - Get the exact size: `wc -c < ~/Downloads/<filename>.gif`.
    - Load the Linear MCP tools:
      ```
