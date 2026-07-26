@@ -90,24 +90,55 @@ Use these tools as needed:
 
 ### 6. Stop recording
 
-Stop the GIF recording. The path will be returned — share it with the user.
+Stop the GIF recording (`gif_creator` action `stop_recording`). This freezes the captured frames but doesn't produce a file yet — export happens in the next step, targeted at wherever the GIF needs to land.
 
-### 7. Upload GIF to GitHub PR or Linear
+### 7. Export the GIF and post it to the PR (or fall back to Linear)
 
-After stopping the recording, upload the GIF to the current PR or a Linear ticket:
+Export with `gif_creator` `action: "export"`, `download: true`, and a descriptive `filename` (e.g. `test_user_filter.gif`). This saves the GIF to `~/Downloads/<filename>.gif` — no further browser interaction needed.
 
-1. **Find the GIF on disk** — the GIF downloads to `~/Downloads/<filename>.gif`. Get its size: `wc -c < ~/Downloads/<filename>.gif`.
+GitHub has no public API for uploading a binary straight into a PR comment (the paste/drag-drop upload web UI uses an internal, session-only endpoint). Instead, host the GIF in the **same repo** on a dedicated orphan branch (`test-recordings`) via git plumbing — this never touches the working tree, index, or current branch, so it's safe to run regardless of uncommitted work — then link it with a `raw.githubusercontent.com` URL pinned to that commit. This keeps the recording under the repo's normal access control (private repo → private GIF) without polluting the PR branch's own history.
 
-2. **Try GitHub PR first** — check if a PR exists for the current branch:
+1. Check whether a PR exists for the current branch:
    ```bash
    gh pr view --json number,url 2>/dev/null
    ```
-   If a PR exists, post the GIF as a PR comment using a markdown image. GitHub doesn't support direct binary uploads via CLI, so use Linear instead.
 
-3. **Upload to Linear** — load the Linear MCP tools:
+2. **If a PR exists**, publish the GIF via plumbing commands (no checkout, no `git add`, nothing touches the current branch):
+   ```bash
+   GIF_PATH=~/Downloads/<filename>.gif
+   PR_NUMBER=$(gh pr view --json number -q .number)
+   OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+   BRANCH=test-recordings
+   SLUG="pr${PR_NUMBER}-$(date +%Y%m%d-%H%M%S)-<feature-slug>.gif"
+
+   BLOB_SHA=$(git hash-object -w "$GIF_PATH")
+
+   if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+     git fetch origin "$BRANCH":"refs/remotes/origin/$BRANCH" -q
+     PARENT_SHA=$(git rev-parse "refs/remotes/origin/$BRANCH")
+     BASE_TREE=$(git rev-parse "$PARENT_SHA^{tree}")
+     TREE_SHA=$( { git ls-tree "$BASE_TREE"; printf '100644 blob %s\t%s\n' "$BLOB_SHA" "$SLUG"; } | git mktree )
+     NEW_COMMIT=$(git commit-tree "$TREE_SHA" -p "$PARENT_SHA" -m "Add test recording for PR #$PR_NUMBER")
+   else
+     TREE_SHA=$(printf '100644 blob %s\t%s\n' "$BLOB_SHA" "$SLUG" | git mktree)
+     NEW_COMMIT=$(git commit-tree "$TREE_SHA" -m "Add test recording for PR #$PR_NUMBER")
+   fi
+
+   git push origin "$NEW_COMMIT:refs/heads/$BRANCH"
+
+   RAW_URL="https://raw.githubusercontent.com/${OWNER_REPO}/${NEW_COMMIT}/${SLUG}"
+   gh pr comment "$PR_NUMBER" --body "$(printf '### Test recording\n\n![%s](%s)\n' "<feature name>" "$RAW_URL")"
    ```
-   ToolSearch: select:mcp__claude_ai_Linear__list_issues,mcp__claude_ai_Linear__save_issue,mcp__claude_ai_Linear__prepare_attachment_upload,mcp__claude_ai_Linear__create_attachment_from_upload,mcp__claude_ai_Linear__list_teams
-   ```
+   Confirm the comment posted (`gh pr view --json comments` or the URL `gh pr comment` prints) and note it for the report.
+
+3. **If the push or comment fails** (no push access, branch protection, etc.): fall back to the Linear path below.
+
+4. **If no PR exists:** upload to Linear:
+   - Get the exact size: `wc -c < ~/Downloads/<filename>.gif`.
+   - Load the Linear MCP tools:
+     ```
+     ToolSearch: select:mcp__claude_ai_Linear__list_issues,mcp__claude_ai_Linear__save_issue,mcp__claude_ai_Linear__prepare_attachment_upload,mcp__claude_ai_Linear__create_attachment_from_upload,mcp__claude_ai_Linear__list_teams
+     ```
    - Search for an existing issue: `mcp__claude_ai_Linear__list_issues` with `query: "<feature name>"`.
    - If none found, create one with `mcp__claude_ai_Linear__save_issue` (team: from `list_teams`, title: the feature name, state: "Done", add a PR link if available).
    - Upload: call `prepare_attachment_upload` with `issue`, `filename`, `contentType: "image/gif"`, `size` (exact bytes). This returns a signed `uploadRequest.url`.
@@ -121,8 +152,7 @@ After stopping the recording, upload the GIF to the current PR or a Linear ticke
        "<uploadRequest.url>"
      ```
    - Finalize: call `create_attachment_from_upload` with `issue` and `assetUrl`.
-
-4. Include the Linear issue URL in the test report.
+   - Include the Linear issue URL in the test report.
 
 ### 8. Report results
 
@@ -155,4 +185,5 @@ If no issues were found, say so clearly. Do not pad the report with filler.
 - If a browser tool fails 2–3 times, stop and ask the user for guidance rather than retrying in a loop.
 - Always start from a fresh tab (step 4); never trust a tab id carried over from an earlier turn/session.
 - Do not navigate to unrelated pages.
-- Do not commit, push, or modify any files as part of this skill.
+- Do not modify, stage, or commit anything on the current branch or working tree — the only git writes this skill performs are the plumbing commands in step 7, which write directly to the separate `test-recordings` branch and never touch `HEAD`, the index, or the branch under test.
+- Step 7's push and PR comment are real, visible actions on a shared remote. If it's unclear whether the push or comment actually landed, verify with `gh pr view --json comments` before reporting success rather than assuming.
