@@ -92,64 +92,40 @@ Use these tools as needed:
 
 Stop the GIF recording (`gif_creator` action `stop_recording`). This freezes the captured frames but doesn't produce a file yet — export happens in the next step, targeted at wherever the GIF needs to land.
 
-### 7. Export the GIF, then upload to Linear (default) or the PR (public repos only)
+### 7. Export the GIF and publish it to MinIO, then link it from the PR or Linear
 
 Export with `gif_creator` `action: "export"`, `download: true`, and a descriptive `filename` (e.g. `test_user_filter.gif`). This saves the GIF to `~/Downloads/<filename>.gif` — no further browser interaction needed.
 
-**Linear is the default target.** GitHub has no public API for uploading a binary straight into a PR comment — the paste/drag-drop upload in the web UI hits an internal, session-only endpoint that `gh`/`git` can't reach. A `raw.githubusercontent.com` link pinned to a commit *looks* like a workaround, but only actually renders for **public** repos: for private repos that domain requires an `Authorization` header on every request, which a viewer's browser never sends just from being logged into github.com (verified: 404 without a token, 200 with one) — so the image would show as broken to anyone opening the PR. The only URLs that render inline for a private repo without extra auth are the ones GitHub itself issues through its authenticated upload flow (browser drag-drop or the internal API), neither of which is available here.
+GIFs are hosted on a self-hosted MinIO instance (`s3.deploy.sakuga.dev`, Dokploy project `devtools` on `em-sakuga-01`), in a `public` bucket with an anonymous-read (`GetObject`-only, no listing) policy. This gives a plain public URL that works identically for public and private repos — unlike `raw.githubusercontent.com`, which 404s for private repos without an auth header, and unlike GitHub's own drag-drop upload, which has no CLI/API equivalent.
 
-1. Check whether a PR exists **and** whether the repo is public:
+1. Get the uploader secret from the macOS Keychain (never hardcode it, never print it in the report):
+   ```bash
+   MINIO_SECRET=$(security find-generic-password -a "test-feature-uploader" -s "sakuga-minio-test-feature-uploader" -w)
+   ```
+   The access key itself isn't secret: `test-feature-uploader`. If the Keychain lookup fails (item missing, e.g. on a machine that hasn't been set up), fall back to Linear (step 4 below) and tell the user to add the credential.
+
+2. Upload with a unique key so recordings never collide, then link it:
    ```bash
    PR_NUMBER=$(gh pr view --json number -q .number 2>/dev/null)
-   IS_PRIVATE=$(gh repo view --json isPrivate -q .isPrivate 2>/dev/null)
-   ```
+   KEY="${PR_NUMBER:+pr${PR_NUMBER}-}$(date +%Y%m%d-%H%M%S)-<feature-slug>.gif"
 
-2. **If a PR exists and the repo is public** (`IS_PRIVATE` = `false`), publish the GIF via plumbing commands to a dedicated `test-recordings` branch (no checkout, no `git add`, nothing touches the current branch) and link it with a raw URL — this only works because public raw URLs don't require auth:
+   AWS_ACCESS_KEY_ID="test-feature-uploader" AWS_SECRET_ACCESS_KEY="$MINIO_SECRET" AWS_DEFAULT_REGION="us-east-1" \
+     aws s3 cp ~/Downloads/<filename>.gif "s3://public/$KEY" --endpoint-url https://s3.deploy.sakuga.dev
+
+   PUBLIC_URL="https://s3.deploy.sakuga.dev/public/$KEY"
+   ```
+   The object key includes a timestamp and isn't guessable, and the bucket doesn't allow anonymous listing — so this is "unlisted", not indexed/discoverable, even though it's not access-controlled to repo collaborators the way a GitHub-native upload would be. Don't upload anything more sensitive than a UI test recording through this path.
+
+3. **If a PR exists**, post it as a comment:
    ```bash
-   GIF_PATH=~/Downloads/<filename>.gif
-   OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-   BRANCH=test-recordings
-   SLUG="pr${PR_NUMBER}-$(date +%Y%m%d-%H%M%S)-<feature-slug>.gif"
-
-   BLOB_SHA=$(git hash-object -w "$GIF_PATH")
-
-   if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-     git fetch origin "$BRANCH":"refs/remotes/origin/$BRANCH" -q
-     PARENT_SHA=$(git rev-parse "refs/remotes/origin/$BRANCH")
-     BASE_TREE=$(git rev-parse "$PARENT_SHA^{tree}")
-     TREE_SHA=$( { git ls-tree "$BASE_TREE"; printf '100644 blob %s\t%s\n' "$BLOB_SHA" "$SLUG"; } | git mktree )
-     NEW_COMMIT=$(git commit-tree "$TREE_SHA" -p "$PARENT_SHA" -m "Add test recording for PR #$PR_NUMBER")
-   else
-     TREE_SHA=$(printf '100644 blob %s\t%s\n' "$BLOB_SHA" "$SLUG" | git mktree)
-     NEW_COMMIT=$(git commit-tree "$TREE_SHA" -m "Add test recording for PR #$PR_NUMBER")
-   fi
-
-   git push origin "$NEW_COMMIT:refs/heads/$BRANCH"
-
-   RAW_URL="https://raw.githubusercontent.com/${OWNER_REPO}/${NEW_COMMIT}/${SLUG}"
-   gh pr comment "$PR_NUMBER" --body "$(printf '### Test recording\n\n![%s](%s)\n' "<feature name>" "$RAW_URL")"
+   gh pr comment "$PR_NUMBER" --body "$(printf '### Test recording\n\n![%s](%s)\n' "<feature name>" "$PUBLIC_URL")"
    ```
-   Confirm the comment posted (`gh pr view --json comments` or the URL `gh pr comment` prints) and note it for the report.
+   Confirm the comment posted (`gh pr view --json comments`) and note the comment URL for the report.
 
-3. **In every other case — private repo, push failure, or no PR — upload to Linear:**
-   - Get the exact size: `wc -c < ~/Downloads/<filename>.gif`.
-   - Load the Linear MCP tools:
-     ```
-     ToolSearch: select:mcp__claude_ai_Linear__list_issues,mcp__claude_ai_Linear__save_issue,mcp__claude_ai_Linear__prepare_attachment_upload,mcp__claude_ai_Linear__create_attachment_from_upload,mcp__claude_ai_Linear__list_teams
-     ```
-   - Search for an existing issue: `mcp__claude_ai_Linear__list_issues` with `query: "<feature name>"`.
-   - If none found, create one with `mcp__claude_ai_Linear__save_issue` (team: from `list_teams`, title: the feature name, state: "Done", add a PR link if available).
-   - Upload: call `prepare_attachment_upload` with `issue`, `filename`, `contentType: "image/gif"`, `size` (exact bytes). This returns a signed `uploadRequest.url`.
-   - PUT the file immediately (signed URL expires in 60s):
-     ```bash
-     curl -s -X PUT --data-binary @~/Downloads/<filename>.gif \
-       -H "content-type: image/gif" \
-       -H "cache-control: public, max-age=31536000" \
-       -H "x-goog-content-length-range: <size>,<size>" \
-       -H 'Content-Disposition: attachment; filename="<filename>.gif"' \
-       "<uploadRequest.url>"
-     ```
-   - Finalize: call `create_attachment_from_upload` with `issue` and `assetUrl`.
+4. **If no PR exists**, attach it to a Linear issue instead (keeps a durable, searchable home for the recording):
+   - Load the Linear MCP tools: `ToolSearch: select:mcp__claude_ai_Linear__list_issues,mcp__claude_ai_Linear__save_issue,mcp__claude_ai_Linear__save_comment,mcp__claude_ai_Linear__list_teams`
+   - Search for an existing issue: `list_issues` with `query: "<feature name>"`. If none found, create one with `save_issue` (team from `list_teams`, title: the feature name, state: "Done").
+   - Post `save_comment` on that issue with body `![<feature name>](<PUBLIC_URL>)`.
    - Include the Linear issue URL in the test report.
 
 ### 8. Report results
@@ -183,5 +159,6 @@ If no issues were found, say so clearly. Do not pad the report with filler.
 - If a browser tool fails 2–3 times, stop and ask the user for guidance rather than retrying in a loop.
 - Always start from a fresh tab (step 4); never trust a tab id carried over from an earlier turn/session.
 - Do not navigate to unrelated pages.
-- Do not modify, stage, or commit anything on the current branch or working tree — the only git writes this skill performs are the plumbing commands in step 7, which write directly to the separate `test-recordings` branch and never touch `HEAD`, the index, or the branch under test.
-- Step 7's push and PR comment are real, visible actions on a shared remote. If it's unclear whether the push or comment actually landed, verify with `gh pr view --json comments` before reporting success rather than assuming.
+- Do not modify, stage, or commit anything on the current branch or working tree. This skill's only writes are the MinIO upload and the PR comment / Linear comment in step 7.
+- Step 7's PR comment (or Linear comment) is a real, visible action. If it's unclear whether it actually landed, verify with `gh pr view --json comments` before reporting success rather than assuming.
+- Never print the MinIO uploader secret in output, logs, or the test report — only pull it into a shell variable via `security find-generic-password`.
