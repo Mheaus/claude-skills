@@ -1,11 +1,23 @@
 ---
 name: release-upstream
-description: Pull main from origin, push to upstream (jexplore-co/frontend), and open a dated release PR from main → production on the upstream repo.
+description: Pull main from origin, push it to the upstream remote, and open a dated release PR from main → production on the upstream repo.
 ---
 
-Sync `sakuga-software/jexplore-web` main to `jexplore-co/frontend` and open a release PR.
+Sync the working repo's `main` to its `upstream` remote and open a release PR from `main` → `production`.
+
+This skill is repo-agnostic: `origin` is the repo you work in, `upstream` is the repo you release to. Both are read from the local git remotes — nothing is hardcoded.
 
 ## Steps
+
+### 0. Resolve the upstream repo
+
+```bash
+git remote get-url upstream
+```
+
+Extract `owner/repo` from that URL (handles both `git@github.com:owner/repo.git` and `https://github.com/owner/repo.git`). Call it `<upstream-repo>` below.
+
+If there is no `upstream` remote, stop and tell the user which remotes exist — do not guess which one to release to.
 
 ### 1. Pull and push
 
@@ -40,7 +52,7 @@ If there are no commits ahead of `upstream/production`, tell the user and stop �
 
 ```bash
 gh pr create \
-  --repo jexplore-co/frontend \
+  --repo <upstream-repo> \
   --base production \
   --head main \
   --title "chore(release): $(date +%Y-%m-%d)" \
@@ -58,7 +70,7 @@ EOF
 )"
 ```
 
-If a PR from `main` to `production` already exists on `jexplore-co/frontend`, print the existing URL instead of creating a new one.
+If a PR from `main` to `production` already exists on `<upstream-repo>`, print the existing URL instead of creating a new one.
 
 ### 5. Report
 
@@ -66,7 +78,7 @@ Print the PR URL. Done.
 
 ## Important
 
-- Always use `--repo jexplore-co/frontend` — never push or open PRs on other repos in this step.
+- Always target `<upstream-repo>` as resolved in step 0 — never push or open PRs on other repos in this step.
 - Never force-push to upstream.
-- The upstream remote is named `upstream` in this repo.
-- If `gh` is not authenticated for the `jexplore-co` org, stop and tell the user.
+- If the upstream repo has no `production` branch, stop and ask the user for the release branch instead of picking one.
+- If `gh` is not authenticated for the upstream owner's org, stop and tell the user.
