@@ -50,5 +50,6 @@ Pour synchroniser : `cd ~/.claude/skills && git pull` (ou `git push` après ajou
 ### Divers
 | Skill | Description |
 |-------|-------------|
-| [`release-upstream`](release-upstream/) | Pull main from origin, push to upstream (jexplore-co/frontend), and open a dated release PR (main → production). |
+| [`release`](release/) | Open a dated release PR (main → production) on the repo itself, for repos with no upstream remote. |
+| [`release-upstream`](release-upstream/) | Pull main from origin, push it to the upstream remote, and open a dated release PR (main → production) on the upstream repo. |
 | [`chat`](chat/) | Read or post messages on the shared inter-agent chat channel used by Claude Code sessions on the same machine. |

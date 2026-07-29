@@ -17,7 +17,7 @@ git remote get-url upstream
 
 Extract `owner/repo` from that URL (handles both `git@github.com:owner/repo.git` and `https://github.com/owner/repo.git`). Call it `<upstream-repo>` below.
 
-If there is no `upstream` remote, stop and tell the user which remotes exist — do not guess which one to release to.
+If there is no `upstream` remote, the repo releases to itself: stop and point the user to the `release` skill, which opens the same PR from `main` → `production` on `origin`.
 
 ### 1. Pull and push
 
@@ -45,6 +45,19 @@ If there are no commits ahead of `upstream/production`, tell the user and stop �
 ### 3. Build the PR body
 
 - **Title**: `chore(release): YYYY-MM-DD` where the date is today in local time (use `date +%Y-%m-%d`)
+
+  **Several releases on the same day** — the date alone is then ambiguous, so the title must carry an index. Count the release PRs already titled with today's date, whatever their state:
+
+  ```bash
+  gh pr list --repo <upstream-repo> --state all \
+    --search "\"chore(release): $(date +%Y-%m-%d)\" in:title" --json number --jq 'length'
+  ```
+
+  - count `0` → no index, the title stays `chore(release): YYYY-MM-DD`
+  - count `N >= 1` → title becomes `chore(release): YYYY-MM-DD - <N+1>`
+
+  The first release of the day never carries an index; the second is ` - 2`, the third ` - 3`, and so on. If the user passed an explicit index as an argument, use it verbatim and skip the count.
+
 - **Commits section**: list every commit from step 2 as a bullet: `- <subject> (#<PR number if present>)`
 - **Test plan**: derive 3–5 checklist items from the commit subjects (focus on `feat` and `fix` entries; skip `chore`/`refactor`/`ci` unless they have user-visible impact)
 
@@ -55,7 +68,7 @@ gh pr create \
   --repo <upstream-repo> \
   --base production \
   --head main \
-  --title "chore(release): $(date +%Y-%m-%d)" \
+  --title "<title from step 3, with its index if any>" \
   --body "$(cat <<'EOF'
 ## Commits
 
