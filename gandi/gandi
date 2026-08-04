@@ -1,0 +1,138 @@
+#!/bin/sh
+# Thin curl wrapper for the Gandi Public API v5.
+#
+# Usage:
+#   gandi [OPTIONS] <METHOD> <PATH> [JSON_BODY] [extra curl options...]
+#
+# Examples:
+#   gandi GET /v5/domain/domains
+#   gandi GET "/v5/domain/check?name=example.com&processes=create"
+#   gandi POST /v5/livedns/domains/example.com/records \
+#     '{"rrset_name":"www","rrset_type":"A","rrset_ttl":3600,"rrset_values":["192.0.2.1"]}'
+#
+# Options:
+#   --sandbox   Send the request to https://api.sandbox.gandi.net
+#   -r, --raw   Print the body as received. Do not format it with jq.
+#   -h, --help  Print this help.
+#
+# The script reads the token in this order:
+#   1. The GANDI_PAT environment variable.
+#   2. The macOS keychain item "gandi-api-key".
+#   3. The macOS keychain item "gandi-pat".
+#
+# The script gives the token to curl through a config file on stdin.
+# This method keeps the token out of the process list.
+#
+# The exit code is 0 for an HTTP 2xx answer, and 1 for any other code.
+
+set -eu
+
+BASE="https://api.gandi.net"
+RAW=0
+
+usage() {
+	sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+if [ "${GANDI_SANDBOX:-0}" = "1" ]; then
+	BASE="https://api.sandbox.gandi.net"
+fi
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--sandbox)
+		BASE="https://api.sandbox.gandi.net"
+		shift
+		;;
+	-r | --raw)
+		RAW=1
+		shift
+		;;
+	-h | --help)
+		usage
+		exit 0
+		;;
+	*) break ;;
+	esac
+done
+
+if [ $# -lt 2 ]; then
+	usage >&2
+	exit 2
+fi
+
+METHOD=$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')
+shift
+REQ_PATH="$1"
+shift
+
+# The first remaining argument is a JSON body when it starts with { or [.
+BODY=""
+case "${1:-}" in
+'{'* | '['*)
+	BODY="$1"
+	shift
+	;;
+esac
+
+TOKEN="${GANDI_PAT:-}"
+for SERVICE in gandi-api-key gandi-pat; do
+	if [ -n "$TOKEN" ]; then break; fi
+	TOKEN=$(security find-generic-password -a "$USER" -s "$SERVICE" -w 2>/dev/null || true)
+done
+if [ -z "$TOKEN" ]; then
+	cat >&2 <<'EOF'
+gandi: no Personal Access Token found.
+Store the token in the keychain (the shell does not record the value):
+  security add-generic-password -a "$USER" -s gandi-api-key -w
+Or export it for one shell:
+  export GANDI_PAT=pat_xxxxxxxx
+EOF
+	exit 1
+fi
+
+if ! printf '%s' "$REQ_PATH" | grep -q '^/'; then
+	echo "gandi: PATH must start with a slash, for example /v5/domain/domains" >&2
+	exit 2
+fi
+
+TMP=$(mktemp -t gandi-api)
+trap 'rm -f "$TMP"' EXIT INT TERM
+
+# Find an Accept header in the extra options. curl sends every -H header, so a
+# default Accept header would go with the one of the caller. Two Accept headers
+# make the API ignore the request of the caller.
+HAS_ACCEPT=0
+for ARG in "$@"; do
+	case "$ARG" in
+	[Aa]ccept:*) HAS_ACCEPT=1 ;;
+	esac
+done
+
+# Build the curl arguments. Keep the extra options that the caller gave last.
+if [ -n "$BODY" ]; then
+	set -- -H "Content-Type: application/json" --data-binary "$BODY" "$@"
+fi
+if [ "$HAS_ACCEPT" -eq 0 ]; then
+	set -- -H "Accept: application/json" "$@"
+fi
+set -- -sS -X "$METHOD" -o "$TMP" -w '%{http_code}' -K - "$@"
+
+CODE=$(printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" |
+	curl "$@" "$BASE$REQ_PATH")
+
+if [ -s "$TMP" ]; then
+	if [ "$RAW" -eq 1 ] || ! jq -e . "$TMP" >/dev/null 2>&1; then
+		cat "$TMP"
+	else
+		jq . "$TMP"
+	fi
+fi
+
+case "$CODE" in
+2*) ;;
+*)
+	echo "gandi: HTTP $CODE on $METHOD $REQ_PATH" >&2
+	exit 1
+	;;
+esac

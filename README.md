@@ -49,6 +49,11 @@ Pour synchroniser : `cd ~/.claude/skills && git pull` (ou `git push` après ajou
 | [`scw-ls`](scw-ls/) | List all running Scaleway resources (instances, k8s, serverless, databases, storage…). |
 | [`scw-cost`](scw-cost/) | Scaleway billing summary — current-month spending, per-product breakdown, invoice history. |
 
+### Gandi / DNS
+| Skill | Description |
+|-------|-------------|
+| [`gandi`](gandi/) | Gandi Public API v5 — domaines, LiveDNS (A, CNAME, MX, TXT…), nameservers, glue records, redirections web, DNSSEC, autorenew, transferts, certificats SSL. Token lu depuis le keychain `gandi-api-key`. |
+
 ### Divers
 | Skill | Description |
 |-------|-------------|
