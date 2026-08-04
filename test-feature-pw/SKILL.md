@@ -5,7 +5,9 @@ description: Test the current feature end-to-end with a Playwright script (no Ch
 
 Test the current feature end-to-end by **driving Playwright's own Chromium from a Node script** — no Chrome extension, so none of the `test-feature` permission-gate friction (recurring "Permission denied by user", and the 500px `resize_window` viewport pinning). Playwright gives exact viewport control, console/network capture, and native video recording.
 
-This is a **sibling** of `test-feature`, not a replacement. Prefer it whenever the extension gate has been fighting you, or when you want a rerunnable artifact (the generated script can seed the E2E pass, PLAI-122). Prefer plain `test-feature` for quick interactive exploration where you don't know the DOM yet.
+This is a **sibling** of `test-feature`, not a replacement. Prefer it whenever the extension gate has been fighting you, or when you want a rerunnable artifact (the generated script can seed a project's E2E suite). Prefer plain `test-feature` for quick interactive exploration where you don't know the DOM yet.
+
+Nothing here is tied to one repo. Everything project-shaped — origin, dev-login route, Postgres container — is passed in as an environment variable, and the harness throws a named error rather than falling back to another project's value.
 
 The reusable harness lives at `~/.claude/skills/test-feature-pw/lib/harness.mjs` and carries all the boilerplate (launch, dev login, active-org, console/network capture, webm→gif). Your per-feature runner only expresses the interactions + assertions.
 
@@ -25,47 +27,61 @@ Run in parallel (same as `test-feature`):
 
 Identify the route, the UI added/changed, the main action, and one edge case. Note stable selectors you can target: prefer `getByRole(..., { name })`, `getByText`, `getByLabel` over CSS.
 
-### 2. Find the dev server URL
+### 2. Find the dev server URL and the project's dev-login route
 
-If a URL was passed, use it. Otherwise the Plai dev server is **http://localhost:5210** (Claude Code port). Confirm it's up:
-```
-lsof -iTCP:5210 -sTCP:LISTEN -n -P 2>/dev/null | head -1
+If a URL was passed, use it. Otherwise look for the port the repo pins for Claude Code sessions — most repos state it in `CLAUDE.md` — then confirm something is listening:
+```bash
+grep -riE 'claude code|dev server' CLAUDE.md | grep -oE ':[0-9]{4}' | sort -u   # the repo's own convention
+lsof -iTCP -sTCP:LISTEN -n -P 2>/dev/null | grep -E ':(3000|4000|4200|517[0-9]|52[0-9]{2}|8000|8080)\s'
 ```
 If it isn't running, tell the user and stop — do **not** start it yourself.
 
-Decide the **active org** the feature needs (e.g. `org_seed_dev` for seeded schedule data) — the harness points the dev session at it.
+Then find **how this app logs in during dev**, because it differs per project and the harness needs it spelled out. Look at the login route for a dev shortcut:
+```bash
+grep -rn "dev-login\|dev/login\|DEV_LOGIN" src app --include=*.ts --include=*.tsx | head
+```
+The two shapes seen so far:
+
+| Shape | Env |
+| --- | --- |
+| `GET /api/dev/login` sets the cookie itself | `TFP_LOGIN_PATH=/api/dev/login` |
+| `POST /api/auth/dev-login` with `{ email }` | `TFP_LOGIN_PATH=/api/auth/dev-login TFP_LOGIN_METHOD=POST TFP_LOGIN_EMAIL=admin@example.dev` |
+
+Only if the feature needs a specific **active organization**, also note the local Postgres container and database (`docker compose ps`) — `setActiveOrg` writes the session row directly and requires `TFP_PG_CONTAINER` + `TFP_PG_DB`. Skip it when the dev user's existing org is fine.
 
 ### 3. Write the per-feature runner
 
 Write `run.mjs` into the scratchpad dir. It imports the harness via `process.env.TFP_HARNESS` (a dynamic import, so no hard-coded path), logs in, sets the org, drives the feature, screenshots at key moments, and prints a `TFP_REPORT` JSON line. Template:
 
 ```js
-// run.mjs — adapt the interactions to the feature under test.
+// run.mjs — adapt the route, selectors and assertions to the feature under test.
 const { openSession, devLogin, setActiveOrg, pickVideoArtifact, report } = await import(process.env.TFP_HARNESS);
-const BASE = process.env.TFP_BASE ?? 'http://localhost:5210';
+const BASE = process.env.TFP_BASE; // required — no project default
 const OUT = process.env.OUT;
-const ORG = process.env.TFP_ORG; // e.g. org_seed_dev
+const ORG = process.env.TFP_ORG; // only when the feature needs a specific org
 
-const s = await openSession({ outDir: OUT });
+const s = await openSession({ outDir: OUT, viewport: { width: 1440, height: 900 } });
 let result;
 try {
-  await devLogin(s.page, BASE);
+  await devLogin(s.page); // route comes from TFP_LOGIN_* — see step 2
   if (ORG) setActiveOrg(ORG);
 
   // ── Happy path ──────────────────────────────────────────────────────────
-  await s.page.goto(`${BASE}/schedule`, { waitUntil: 'networkidle' });
+  // Not `networkidle` if the dev server keeps a socket open (Vite's HMR does):
+  // it never fires and the goto times out at 30s.
+  await s.page.goto(`${BASE}/<route>`, { waitUntil: 'domcontentloaded' });
+  await s.page.getByRole('heading', { name: /<something on the page>/i }).waitFor({ timeout: 20000 });
   await s.page.screenshot({ path: `${OUT}/01-before.png` });
 
-  await s.page.getByRole('button', { name: /Dupliquer ce plan/i }).click();
-  await s.page.getByText(/Plan dupliqué/i).waitFor({ timeout: 10000 });
-  await s.page.waitForLoadState('networkidle');
-  await s.page.waitForTimeout(600); // let toasts/animations settle for the GIF
+  await s.page.getByRole('button', { name: /<the main action>/i }).click();
+  await s.page.getByText(/<the expected confirmation>/i).waitFor({ timeout: 10000 });
+  await s.page.waitForTimeout(600); // let toasts/animations settle for the recording
   await s.page.screenshot({ path: `${OUT}/02-after.png` });
 
   // ── Collect results (don't throw here — a throw would skip the report;
   //    prefer booleans so a failed check still reports what it saw) ─────────
   result = {
-    toastShown: (await s.page.getByText(/Plan dupliqué/i).count()) > 0,
+    confirmed: (await s.page.getByText(/<the expected confirmation>/i).count()) > 0,
     consoleErrors: s.consoleErrors,
     apiErrors: s.apiResponses.filter((r) => r.status >= 400),
   };
@@ -77,7 +93,7 @@ try {
 // webm when it's ≤5 MB (higher quality, usually smaller) and only falls back to
 // a compressed GIF for heavier recordings.
 const artifact = pickVideoArtifact(OUT, { gifName: 'test_<feature>.gif' });
-report({ ok: result.toastShown && result.apiErrors.length === 0, artifact, ...result });
+report({ ok: result.confirmed && result.apiErrors.length === 0, artifact, ...result });
 ```
 
 Notes:
@@ -92,8 +108,11 @@ Notes:
 SCRATCH="<your scratchpad dir>"
 OUT="$SCRATCH/tfp-out"; rm -rf "$OUT"; mkdir -p "$OUT"
 TFP_HARNESS="$HOME/.claude/skills/test-feature-pw/lib/harness.mjs" \
-TFP_BASE="http://localhost:5210" TFP_ORG="org_seed_dev" OUT="$OUT" \
-${HEADED:+TFP_HEADLESS=false} node "$SCRATCH/run.mjs"
+TFP_BASE="http://localhost:<port>" \
+TFP_LOGIN_PATH="<the dev-login route from step 2>" \
+${LOGIN_POST:+TFP_LOGIN_METHOD=POST TFP_LOGIN_EMAIL="<dev user email>"} \
+${ORG:+TFP_ORG="$ORG" TFP_PG_CONTAINER="<container>" TFP_PG_DB="<db>"} \
+OUT="$OUT" ${HEADED:+TFP_HEADLESS=false} node "$SCRATCH/run.mjs"
 ```
 Read the `TFP_REPORT` line and the screenshots (`Read $OUT/01-before.png` …). If a selector missed or a state was wrong, fix `run.mjs` and rerun — no permission prompts, ever. If `node` can't resolve `playwright`, confirm the global path (`TFP_PW_GLOBAL`, defaults to `/opt/homebrew/lib/node_modules/`).
 
@@ -134,7 +153,8 @@ Confirm the comment landed (`gh pr view --json comments`), then write the concis
 
 - Dev server must already be running (step 2) — never start it.
 - This skill's only writes are the scratchpad runner/artifacts, the MinIO upload, and the PR/Linear comment. Do **not** modify, stage, or commit the branch or working tree.
-- `setActiveOrg` runs a dev-only `UPDATE session` via `docker exec plai_postgres` — it's for local dev data only.
+- `setActiveOrg` runs a dev-only `UPDATE session` via `docker exec <TFP_PG_CONTAINER>` — local dev data only, never a remote database.
+- The harness has **no project defaults**: missing `TFP_BASE`, `TFP_LOGIN_PATH`, `TFP_PG_CONTAINER` or `TFP_PG_DB` raises a named error. If you see one, supply it from step 2 rather than guessing another repo's value.
 - Never print the MinIO secret.
 - If Playwright genuinely can't launch (missing browser, etc.), report it and fall back to `test-feature`; don't loop.
 

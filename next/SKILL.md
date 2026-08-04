@@ -10,12 +10,12 @@ The PR from the current branch has just been **merged**. Unlike `/wn` (which ask
 
 ### 1–3. Discover (same as `/wn`)
 1. Sync main: `git checkout main && git pull origin main` (the merged commit is now on `main`).
-2. Determine the active Linear project — `$ARGUMENTS` if given, else the project of the work just merged (in this repo: **"Rapports & Stats V1"**, team **Jexplore**).
-3. List Todo issues via the Linear MCP (`mcp__claude_ai_Linear__list_issues(project, state: "Todo", limit: 30)`; load it with ToolSearch `select:mcp__claude_ai_Linear__list_issues,mcp__claude_ai_Linear__get_issue` if needed). Ignore anything whose PR already merged onto `main`.
+2. Determine the active team and project the same way `/wn` step 2 does — `$ARGUMENTS` if given, otherwise from the Linear issue key carried by the merged branch or recent commits (a key like `ABC-131` belongs to the team owning the `ABC` prefix), then that issue's project. No project is hardcoded, and never fall back to another team's.
+3. List Todo issues via the Linear MCP (`mcp__claude_ai_Linear__list_issues(team, state: "Todo", limit: 30)`, scoped to the project when one is clear; load it with ToolSearch `select:mcp__claude_ai_Linear__list_issues,mcp__claude_ai_Linear__get_issue,mcp__claude_ai_Linear__list_projects` if needed). Ignore anything whose PR already merged onto `main`.
 
 ### 4. Pick the best task (your call — do NOT ask)
 Rank by, in order:
-1. **Unblocked** — skip anything that "dépend de tous les autres lots" / is gated on other work (e.g. a client-recette/release ticket). Those go last.
+1. **Unblocked** — skip anything gated on other work (a ticket whose description says it depends on the other batches, a client-acceptance or release ticket). Those go last.
 2. **Priority** — honour Urgent/High first when set.
 3. **Continuity + value** — prefer tasks that build on the code you're already deep in, and small/medium well-scoped tickets over large refactors or pure-docs/DX chores, unless those are higher priority.
 

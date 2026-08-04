@@ -29,7 +29,7 @@ End-to-end flow: open a PR against the `sakuga-software` remote, request reviews
 
 ### 4. Push and open the PR
 - `git push -u <sakuga-remote> <branch-name>`
-- Extract `owner/repo` from the sakuga remote URL (e.g. `sakuga-software/jexplore-web`).
+- Extract `owner/repo` from the sakuga remote URL (`git@github.com:sakuga-software/<repo>.git` → `sakuga-software/<repo>`).
 - Open the PR:
   ```bash
   gh pr create --repo <owner/repo> --title "<short title under 70 chars>" --body "$(cat <<'EOF'
@@ -120,7 +120,7 @@ The `sound name "Glass"` in the notification already plays a sound, but `afplay`
 
 ## Important
 
-- The sakuga-software remote is the **target**; never push to `upstream`/`jexplore` from this skill.
+- The sakuga-software remote is the **target**; never push to any other remote from this skill — not a fork, not an `upstream` pointing at a client's or vendor's org.
 - Never apply a suggestion blindly — always read the surrounding code first.
 - Never force-push, never `--no-verify`, never `--amend` after a failed hook.
 - If `gh` is missing, stop and tell the user.

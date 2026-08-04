@@ -30,9 +30,9 @@ Otherwise, detect where the app is running:
 
 1. Check for a running dev server — look for common ports:
    ```
-   lsof -iTCP -sTCP:LISTEN -n -P 2>/dev/null | grep -E ':(3000|3001|4000|4200|5173|5174|5175|5200|8080|8000|8888|9000)\s' | head -5
+   lsof -iTCP -sTCP:LISTEN -n -P 2>/dev/null | grep -E ':(3000|3001|4000|4200|517[0-9]|52[0-9]{2}|8080|8000|8888|9000)\s' | head -5
    ```
-   Note: Suricarte's dedicated Claude Code port is **5200** (avoid conflicts with other projects on 5173–5175).
+   Many repos pin a dedicated port for Claude Code sessions so a session never collides with the port the user is already on — check the repo's `CLAUDE.md` before assuming the framework default.
 2. Fall back to config files — check `package.json`, `.env`, `.env.local`, `vite.config.*`, `next.config.*` for port or base URL settings.
 3. If still unclear, ask the user: "What URL should I test? (e.g. http://localhost:3000)"
 
