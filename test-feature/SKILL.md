@@ -53,7 +53,7 @@ select:mcp__claude-in-chrome__gif_creator
 ### 4. Start recording & open the app
 
 1. Call `mcp__claude-in-chrome__tabs_context_mcp` first to sync with the current tab group.
-2. **Always create a FRESH tab** with `mcp__claude-in-chrome__tabs_create_mcp` and work in it — do **not** reuse a tab id from a previous turn/session even if it shows the dev URL. Stale tabs are the #1 cause of `Permission denied by user` and `Tab … no longer exists` errors, and tab ids can silently change between calls (re-read them from each tool result). Only reuse an existing tab if the user explicitly asks.
+2. **Create a FRESH tab** with `mcp__claude-in-chrome__tabs_create_mcp` and work in it — do **not** reuse a tab id from a **previous session** even if it shows the dev URL. Stale (cross-session) tabs are the #1 cause of `Permission denied by user` and `Tab … no longer exists` errors, and tab ids can silently change between calls (re-read them from each tool result). **Exception:** a tab you *successfully navigated to the target origin earlier in this same session* is not stale — reusing it is fine and avoids re-triggering the denial loop (see the `Permission denied` section below). Otherwise start fresh.
 3. Start a GIF recording with `mcp__claude-in-chrome__gif_creator` (pass the fresh `tabId`). Name the file after the feature (e.g. `test_user_filter.gif`). Capture extra frames at the start and end for smooth playback.
 4. Navigate to the dev server URL (or the specific route where the feature lives, if known from the diff).
 
@@ -61,14 +61,21 @@ select:mcp__claude-in-chrome__gif_creator
 
 #### `Permission denied by user` on navigate — often MISLEADING, retry first
 
-This error is **known to be misleading and frequently transient**. It does **not** reliably mean the user actually denied anything, nor that extension site access is off — the *same* `navigate` call often just **succeeds on a later retry with no change on the user's side** (observed 2026-07-26: denied twice, then went through on the next attempt with nothing granted).
+This error is **known to be misleading and frequently transient**. It does **not** reliably mean the user actually denied anything, nor that extension site access is off — the *same* `navigate` call often just **succeeds on a later retry with no change on the user's side** (observed 2026-07-26: denied twice, then through on the next try; observed 2026-08-02: denied **three** times, then through on the **4th** fresh tab — nothing granted in between).
 
 So treat a denial as "try again", not "the user must fix their settings":
 
-1. **Retry the navigation a few times** (2–4), each on a **fresh tab** via `tabs_context_mcp` + `tabs_create_mcp`. Space the attempts out (e.g. across turns) rather than firing the identical call back-to-back. This alone clears most cases.
+0. **First, reuse — don't fight.** If you *already* navigated a tab to the target origin **earlier in this same session** (e.g. an initial layout check before recording), just keep working in that tab: it's already past the permission gate, so reusing it sidesteps the denial loop entirely. The "always a fresh tab" rule in step 4 guards against **cross-session / stale** tab ids — it is *not* a reason to abandon a tab you successfully drove minutes ago and re-provoke the denial. (Only caveat: a GIF recording is scoped to its tab group, so start/stop the recording in whichever tab you settle on.)
+1. **Each retry is a brand-new fresh tab.** Retrying the *same* denied tab tends to keep failing; creating a *new* tab via `tabs_context_mcp` + `tabs_create_mcp` for each attempt is what actually clears it. Budget **up to ~4** attempts (this has been needed), and space them out (across turns) rather than firing the identical call back-to-back.
 2. **Do not** immediately tell the user to change extension permissions — that was the wrong first move; leading with retries is right.
 3. Only if it **persists across several fresh-tab retries** may you mention, as a *possible* cause, that the Claude Chrome extension's site access could be off for that origin (site access is per origin *and* port, so `:5173` ≠ `:5200`) — they can check via the extension icon → site access, or `chrome://extensions` → Claude → Site access. Frame it as "possibly, the message is often misleading", and still retry after.
 4. If it never succeeds after all that, stop and report — don't keep looping `navigate` in a tight cycle.
+
+##### Prefer in-page navigation for same-origin route changes
+
+After the first `navigate`-tool load of the origin, drive subsequent same-origin route changes from inside the page — either a `computer` click on an in-app `<Link>` (client-side SPA nav, the normal way to exercise the feature), or `javascript_tool` running `window.location.assign('http://localhost:PORT/route'); 'ok'`. Use `javascript_tool` only for that `location.assign` call; read and verify page state with the dedicated tools (`screenshot`, `read_page`, `get_page_text`, `find`, `read_console_messages`) rather than reading the DOM through JS. (The GIF recorder captures only `navigate`/`computer` actions, so `location.assign` hops aren't frames — take a `computer` screenshot after each to add one.)
+
+> **Separate, unrelated gotcha (not a permission issue):** `resize_window` reports success but the **captured viewport can stay pinned** at its earlier size (observed 2026-08-02, stuck ~1474px), so screenshots/GIF frames may not reflect a resize. Don't burn attempts chasing it — if you need to show a responsive breakpoint you can't capture, demonstrate it another way (interact at the width you *can* capture) and note the responsive behavior was verified by class logic, not on video.
 
 ### 5. Exercise the feature
 

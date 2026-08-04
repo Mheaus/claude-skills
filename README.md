@@ -39,6 +39,8 @@ Pour synchroniser : `cd ~/.claude/skills && git pull` (ou `git push` après ajou
 |-------|-------------|
 | [`test-feature`](test-feature/) | Test the current feature via Claude in Chrome (git diff → dev server → drive the app → GIF → upload PR/Linear). |
 | [`tf`](tf/) | Raccourci → `test-feature`. |
+| [`test-feature-pw`](test-feature-pw/) | Test the current feature via a Playwright script (no Chrome extension / no permission gate → dev server → run script → webm ≤5 Mo, sinon GIF → upload PR/Linear). |
+| [`tfp`](tfp/) | Raccourci → `test-feature-pw`. |
 
 ### Scaleway
 | Skill | Description |
