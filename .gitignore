@@ -1,1 +1,4 @@
 .DS_Store
+
+# Local, entity-specific reference files kept out of the public repo.
+*.local.md
