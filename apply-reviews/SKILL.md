@@ -15,12 +15,13 @@ Read the review comments left by **every** review bot on the current PR, apply t
 
 2. **Wait for a bot review to land (using the Monitor tool)**:
    - **Never filter on a list of known bot names.** An allowlist silently drops whichever
-     reviewer it has not heard of: this skill used to name only Copilot, and missed a
-     `sakuga-claude-review[bot]` review that raised a real functional defect and failed its own
-     check. Match on the `[bot]` suffix so a reviewer added later needs no edit here.
+     reviewer it has not heard of, and reports "no review" — indistinguishable from a review
+     that found nothing. This skill used to name a single reviewer and missed another one's
+     report of a real functional defect. Match on the `[bot]` suffix so a reviewer added later
+     needs no edit here.
    - **Endpoint quirks:**
-     - `/pulls/<n>/reviews` — bots appear under their full name, e.g.
-       `copilot-pull-request-reviewer[bot]`, `sakuga-claude-review[bot]`.
+     - `/pulls/<n>/reviews` — bots appear under their full name, suffix included, e.g.
+       `copilot-pull-request-reviewer[bot]`.
      - `/pulls/<n>/comments` — the same bot may use a *different* login: Copilot posts line
        comments as plain `Copilot`, with no suffix. Others keep theirs.
      - The **PR author appears on both**, your own replies included.

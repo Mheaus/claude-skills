@@ -56,11 +56,11 @@ gh api --method POST repos/<owner>/<repo>/pulls/<n>/requested_reviewers \
 
 ### 6. Wait for the first bot review (Monitor)
 
-**Never filter on a list of known bot names.** An allowlist silently drops whichever reviewer it has not heard of: `sakuga-claude-review[bot]` reviewed a PR, raised a real functional defect, failed its own check — and a filter naming only Copilot and `anthropic-code-agent` reported "no review". Match on the `[bot]` suffix instead, so a reviewer added later is picked up without editing this file.
+**Never filter on a list of known bot names.** An allowlist silently drops whichever reviewer it has not heard of, and reports "no review" — which is indistinguishable from a review that found nothing. That has already cost a real functional defect, raised by a reviewer the list predated. Match on the `[bot]` suffix instead, so a reviewer added later is picked up without editing this file.
 
 **Endpoint quirks worth knowing:**
-- `/pulls/<n>/reviews` — bots appear with their full name, e.g. `copilot-pull-request-reviewer[bot]`, `sakuga-claude-review[bot]`.
-- `/pulls/<n>/comments` — the same bot may use a *different* login here: Copilot posts line comments as plain `Copilot`, with no suffix. Others (`sakuga-claude-review[bot]`) keep theirs.
+- `/pulls/<n>/reviews` — bots appear with their full name, suffix included, e.g. `copilot-pull-request-reviewer[bot]`.
+- `/pulls/<n>/comments` — the same bot may use a *different* login here: Copilot posts line comments as plain `Copilot`, with no suffix. Most others keep theirs, which is why the filter needs both forms.
 - **The PR author appears on both**, including your own replies, so filter those out or you will re-process what you already answered.
 
 Single immediate check first — skip the Monitor if a review is already there:
