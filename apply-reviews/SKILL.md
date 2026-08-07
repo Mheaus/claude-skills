@@ -1,10 +1,10 @@
 ---
 name: apply-reviews
-description: Read GitHub Copilot's review comments on the current PR, apply coherent fixes, commit, push, and reply to each comment.
+description: Read the bot review comments on the current PR, apply coherent fixes, commit, push, and reply to each comment.
 argument-hint: [pr-number]
 ---
 
-Read Copilot's review comments on the current PR, apply the ones you judge coherent, commit and push, then reply to each comment with the detail of the fix.
+Read the review comments left by **every** review bot on the current PR, apply the ones you judge coherent, commit and push, then reply to each comment with the detail of the fix.
 
 ## Steps
 
@@ -13,34 +13,50 @@ Read Copilot's review comments on the current PR, apply the ones you judge coher
    - Otherwise, detect the current PR from the current branch: `gh pr view --json number,url,headRepository`
    - Determine the `owner/repo` from the PR metadata
 
-2. **Wait for Copilot's review to complete (using the Monitor tool)**:
-   - **Important — Copilot's login differs by endpoint**:
-     - On `/pulls/<n>/reviews` the review author login is `copilot-pull-request-reviewer[bot]`.
-     - On `/pulls/<n>/comments` (line comments) the author login is `Copilot`.
-     - Don't reuse the same filter across both endpoints or you'll loop forever.
-   - First do a single immediate check — if the review already exists, skip straight to step 3:
+2. **Wait for a bot review to land (using the Monitor tool)**:
+   - **Never filter on a list of known bot names.** An allowlist silently drops whichever
+     reviewer it has not heard of: this skill used to name only Copilot, and missed a
+     `sakuga-claude-review[bot]` review that raised a real functional defect and failed its own
+     check. Match on the `[bot]` suffix so a reviewer added later needs no edit here.
+   - **Endpoint quirks:**
+     - `/pulls/<n>/reviews` — bots appear under their full name, e.g.
+       `copilot-pull-request-reviewer[bot]`, `sakuga-claude-review[bot]`.
+     - `/pulls/<n>/comments` — the same bot may use a *different* login: Copilot posts line
+       comments as plain `Copilot`, with no suffix. Others keep theirs.
+     - The **PR author appears on both**, your own replies included.
+   - First do a single immediate check — if a review already exists, skip straight to step 3:
      ```bash
      gh api repos/<owner>/<repo>/pulls/<number>/reviews \
-       --jq '.[] | select(.user.login=="copilot-pull-request-reviewer[bot]") | .state'
+       --jq '.[] | select(.user.login | endswith("[bot]")) | "\(.user.login) \(.state)"'
      ```
-   - If the check returns nothing, start a Monitor that polls every 30s and emits a single line the moment Copilot submits a review. Exit the Monitor immediately after the first event so the agent resumes:
+   - If the check returns nothing, start a Monitor that polls every 30s and emits a single line
+     the moment a bot submits a review. Exit the Monitor immediately after the first event:
      ```bash
-     # description: "Copilot review on PR <n>"
+     # description: "bot review on PR <n>"
      # timeout_ms: 600000   # 10 min cap
      until out=$(gh api repos/<owner>/<repo>/pulls/<number>/reviews \
-         --jq '.[] | select(.user.login=="copilot-pull-request-reviewer[bot]") | "\(.state) \(.submitted_at)"' 2>/dev/null) \
+         --jq '.[] | select(.user.login | endswith("[bot]")) | "\(.user.login) \(.state) \(.submitted_at)"' 2>/dev/null) \
          && [ -n "$out" ]; do
        sleep 30
      done
      echo "$out"
      ```
-     The single stdout line is your notification — Monitor surfaces it to you and the Monitor exits.
+     The single stdout line is your notification — Monitor surfaces it and exits.
    - If the Monitor times out without an event, ask the user whether to proceed anyway or abort. Do not fall back to direct polling (silent loops burn context).
 
-3. **Fetch Copilot review comments**:
-   - Run `gh api repos/<owner>/<repo>/pulls/<number>/comments --jq '.[] | select(.user.login=="Copilot") | {id, path, line, body}'`
-   - Note: line comments use `user.login == "Copilot"` (not the bot login used on `/reviews`).
-   - If there are no Copilot comments, inform the user and stop.
+3. **Fetch the review comments**:
+   ```bash
+   gh api repos/<owner>/<repo>/pulls/<number>/comments \
+     --jq '.[] | select((.user.login | endswith("[bot]")) or .user.login == "Copilot")
+               | select(.in_reply_to_id == null)
+               | {id, user: .user.login, path, line, body}'
+   ```
+   `in_reply_to_id == null` keeps only top-level comments — replies are yours or threaded
+   follow-ups, and re-processing them wastes a round.
+   - Also read the **review bodies** from step 2 and run `gh pr checks <number>`: a bot may put
+     its finding in the body rather than on a line, and may publish a **check of its own** that
+     fails. A failing review check with no line comment still means something needs answering.
+   - If nothing actionable turns up anywhere, inform the user and stop.
 
 4. **Analyse each comment**:
    - Read the comment body and the suggested change

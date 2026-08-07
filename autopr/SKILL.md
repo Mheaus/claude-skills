@@ -54,23 +54,27 @@ gh api --method POST repos/<owner>/<repo>/pulls/<n>/requested_reviewers \
   -f 'reviewers[]=anthropic-code-agent' 2>/dev/null || true
 ```
 
-### 6. Wait for the first review from either bot (Monitor)
-**Login quirks — do not confuse these endpoints:**
-- `/pulls/<n>/reviews` — review author logins: `copilot-pull-request-reviewer[bot]` and `anthropic-code-agent[bot]` (or `anthropic-code-agent`)
-- `/pulls/<n>/comments` — line-comment author logins: `Copilot` and `anthropic-code-agent` (case matters)
+### 6. Wait for the first bot review (Monitor)
+
+**Never filter on a list of known bot names.** An allowlist silently drops whichever reviewer it has not heard of: `sakuga-claude-review[bot]` reviewed a PR, raised a real functional defect, failed its own check — and a filter naming only Copilot and `anthropic-code-agent` reported "no review". Match on the `[bot]` suffix instead, so a reviewer added later is picked up without editing this file.
+
+**Endpoint quirks worth knowing:**
+- `/pulls/<n>/reviews` — bots appear with their full name, e.g. `copilot-pull-request-reviewer[bot]`, `sakuga-claude-review[bot]`.
+- `/pulls/<n>/comments` — the same bot may use a *different* login here: Copilot posts line comments as plain `Copilot`, with no suffix. Others (`sakuga-claude-review[bot]`) keep theirs.
+- **The PR author appears on both**, including your own replies, so filter those out or you will re-process what you already answered.
 
 Single immediate check first — skip the Monitor if a review is already there:
 ```bash
 gh api repos/<owner>/<repo>/pulls/<n>/reviews \
-  --jq '.[] | select(.user.login=="copilot-pull-request-reviewer[bot]" or (.user.login|startswith("anthropic-code-agent"))) | "\(.user.login) \(.state) \(.submitted_at)"'
+  --jq '.[] | select(.user.login | endswith("[bot]")) | "\(.user.login) \(.state) \(.submitted_at)"'
 ```
 
 If empty, start a Monitor that polls every 30s and exits on the first event:
 ```bash
-# description: "PR <n>: waiting for Copilot/Claude review"
+# description: "PR <n>: waiting for a bot review"
 # timeout_ms: 900000   # 15 min cap
 until out=$(gh api repos/<owner>/<repo>/pulls/<n>/reviews \
-    --jq '.[] | select(.user.login=="copilot-pull-request-reviewer[bot]" or (.user.login|startswith("anthropic-code-agent"))) | "\(.user.login) \(.state) \(.submitted_at)"' 2>/dev/null) \
+    --jq '.[] | select(.user.login | endswith("[bot]")) | "\(.user.login) \(.state) \(.submitted_at)"' 2>/dev/null) \
     && [ -n "$out" ]; do
   sleep 30
 done
@@ -78,12 +82,19 @@ echo "$out"
 ```
 If the Monitor times out, ask the user whether to proceed anyway. Do not fall back to a raw polling loop.
 
-### 7. Fetch review comments from both bots
+### 7. Fetch the review comments
+
 ```bash
 gh api repos/<owner>/<repo>/pulls/<n>/comments \
-  --jq '.[] | select(.user.login=="Copilot" or .user.login=="anthropic-code-agent") | {id, user: .user.login, path, line, body}'
+  --jq '.[] | select((.user.login | endswith("[bot]")) or .user.login == "Copilot")
+            | select(.in_reply_to_id == null)
+            | {id, user: .user.login, path, line, body}'
 ```
-If there are no line comments, still fetch the review body (step 6 output includes it) to check for actionable text — otherwise inform the user and jump to step 11 (notification).
+`in_reply_to_id == null` keeps only top-level comments — replies are yours or threaded follow-ups.
+
+Also read the **review bodies** (step 6 output) and `gh pr checks <n>`: a review bot may post its finding in the body rather than on a line, and it may publish a **check of its own** that fails. A failing review check with no line comment still means there is something to answer.
+
+If nothing actionable turns up anywhere, tell the user and jump to step 11 (notification).
 
 ### 8. Analyse each comment
 - Read the file referenced by the comment.
