@@ -55,6 +55,8 @@ git diff --cached | grep -inE \
 | [`ar`](apply-reviews/) | Raccourci → `apply-reviews`. |
 | [`wn`](wn/) | What's next — PR mergée : sync main, liste les tâches Linear (Todo) du projet actif et recommande la meilleure. |
 | [`next`](next/) | Comme `wn`, mais autonome : sync main, choisit la tâche, l'implémente, et enchaîne sur `autopr` sans demander. |
+| [`simplify-comments`](simplify-comments/) | Réécrit les commentaires du changement en ASD-STE100 : phrases courtes, une idée chacune, voix active. Mesure avant de juger, fusionne les doublons, supprime ce qui redit le code, corrige ceux devenus faux. |
+| [`sc`](simplify-comments/) | Raccourci → `simplify-comments`. |
 
 ### Tests
 | Skill | Description |
