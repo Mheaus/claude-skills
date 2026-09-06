@@ -1,6 +1,6 @@
 ---
 name: next
-description: Like /wn, but fully autonomous — the PR you just opened has been merged; sync main, find the available Linear tasks, pick the best one yourself, start it (branch + implement), and once verified chain straight into /autopr WITHOUT asking the user.
+description: Like /wn, but fully autonomous — the PR you just opened has been merged; sync main, find the available Linear tasks, pick the best one yourself, claim it in Linear (In Progress + assigned) so no other agent starts it too, then start it (branch + implement), and once verified chain straight into /autopr WITHOUT asking the user.
 argument-hint: [project-name]
 ---
 
@@ -11,7 +11,11 @@ The PR from the current branch has just been **merged**. Unlike `/wn` (which ask
 ### 1–3. Discover (same as `/wn`)
 1. Sync main: `git checkout main && git pull origin main` (the merged commit is now on `main`).
 2. Determine the active team and project the same way `/wn` step 2 does — `$ARGUMENTS` if given, otherwise from the Linear issue key carried by the merged branch or recent commits (a key like `ABC-131` belongs to the team owning the `ABC` prefix), then that issue's project. No project is hardcoded, and never fall back to another team's.
-3. List Todo issues via the Linear MCP (`mcp__claude_ai_Linear__list_issues(team, state: "Todo", limit: 30)`, scoped to the project when one is clear; load it with ToolSearch `select:mcp__claude_ai_Linear__list_issues,mcp__claude_ai_Linear__get_issue,mcp__claude_ai_Linear__list_projects` if needed). Ignore anything whose PR already merged onto `main`.
+3. List Todo issues via the Linear MCP (`list_issues(team, state: "Todo", limit: 30)`, scoped to the project when one is clear; load it with ToolSearch `select:…list_issues,…get_issue,…save_issue,…list_projects` if needed). Ignore anything whose PR already merged onto `main`.
+
+   Tool names carry whichever prefix the connected Linear server uses — `mcp__linear__…` or `mcp__claude_ai_Linear__…`. Check the available list rather than assuming one.
+
+   **Listing `Todo` only is half of the collision guard; step 4b is the other half.** You are not the only agent running `/next` against this team. An issue somebody else has already claimed is `In Progress`, so it never reaches your list — which only holds while every agent claims what it takes.
 
 ### 4. Pick the best task (your call — do NOT ask)
 Rank by, in order:
@@ -19,10 +23,18 @@ Rank by, in order:
 2. **Priority** — honour Urgent/High first when set.
 3. **Continuity + value** — prefer tasks that build on the code you're already deep in, and small/medium well-scoped tickets over large refactors or pure-docs/DX chores, unless those are higher priority.
 
-State the pick in one line with a one-line rationale, then start.
+State the pick in one line with a one-line rationale, then claim it.
+
+### 4b. Claim it before you write a line of code
+
+A ticket you are working on but have not claimed is a ticket another agent will start too. Move it **before** the branch, not after the PR:
+
+1. `get_issue(<id>)` — the full description and `gitBranchName`, and a fresh read of its status.
+2. **If it is no longer `Todo`, or it is assigned to somebody who is not you, drop it.** Somebody claimed it between your listing and now. Say so in one line and take the next candidate from step 4 — do not "just finish it anyway", and never reassign a ticket away from whoever holds it.
+3. `save_issue({ id: <id>, state: "In Progress", assignee: "me" })`.
+4. Read it back and confirm it now shows `In Progress` and your name. A write that returned without error is not proof it landed on the row you meant.
 
 ### 5. Start it
-- `mcp__claude_ai_Linear__get_issue(<id>)` for the full description + `gitBranchName`.
 - Create the branch from Linear's suggested name: `git checkout -b <gitBranchName>`.
 - Implement, following the repo conventions (CLAUDE.md), and verify (typecheck/lint/test, and a browser check when it's UI).
 - **Open questions in the ticket:** since this is autonomous, don't stall — make the sensible default, implement it, and clearly flag the decision in your summary and in the eventual PR body so the user can override.
@@ -38,6 +50,8 @@ This is the one exception to "outward actions need a go-ahead": running `/next` 
 ## Important
 - Autonomy covers the whole loop: *which task*, *how to build it*, **and** shipping it via `/autopr`. The only thing you don't do autonomously is **merge** — that stays the user's call.
 - Never merge the PR. Never force-push, `--no-verify`, or `--amend` after a failed hook (see `/autopr`).
-- If no task is clearly startable (all blocked, or the best pick needs a product decision you can't reasonably default), fall back to `/wn` behaviour: report and ask — and do NOT open a PR.
+- If no task is clearly startable (all blocked, or the best pick needs a product decision you can't reasonably default), fall back to `/wn` behaviour: report and ask — and do NOT open a PR. Claim nothing in that case: an unclaimed ticket you never started must stay `Todo`.
 - If verification fails and you can't get it green, stop before `/autopr`: report the blocker instead of opening a broken PR.
+- **Give the claim back when you walk away.** If you claimed a ticket in 4b and then abandon it — blocked, needs a decision, verification will not go green, or the user redirects you — put it back with `save_issue({ id, state: "Todo", assignee: null })` and say you did. A ticket parked in `In Progress` with nobody on it is worse than one nobody claimed: it is invisible to the next agent's listing, so it silently leaves the queue.
+- Once the PR is open, leave the ticket `In Progress`. Merging is what closes it, and merging is the user's call.
 - Match the user's language (French).

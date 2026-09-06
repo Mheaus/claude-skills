@@ -54,7 +54,7 @@ git diff --cached | grep -inE \
 | [`apply-reviews`](apply-reviews/) | Read GitHub Copilot's review comments on the current PR, apply coherent fixes, commit, push, and reply to each comment. |
 | [`ar`](apply-reviews/) | Raccourci → `apply-reviews`. |
 | [`wn`](wn/) | What's next — PR mergée : sync main, liste les tâches Linear (Todo) du projet actif et recommande la meilleure. |
-| [`next`](next/) | Comme `wn`, mais autonome : sync main, choisit la tâche, l'implémente, et enchaîne sur `autopr` sans demander. |
+| [`next`](next/) | Comme `wn`, mais autonome : sync main, choisit la tâche, la réserve dans Linear (In Progress) pour qu'aucun autre agent ne la prenne, l'implémente, et enchaîne sur `autopr` sans demander. |
 | [`simplify-comments`](simplify-comments/) | Réécrit les commentaires du changement en ASD-STE100 : phrases courtes, une idée chacune, voix active. Mesure avant de juger, fusionne les doublons, supprime ce qui redit le code, corrige ceux devenus faux. |
 | [`sc`](simplify-comments/) | Raccourci → `simplify-comments`. |
 
