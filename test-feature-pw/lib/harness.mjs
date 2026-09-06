@@ -52,7 +52,12 @@ export async function openSession({
   viewport = DEFAULTS.viewport,
   record = true,
 } = {}) {
-  const browser = await chromium.launch({ headless });
+  // `TFP_CHANNEL=chrome` launches the installed Google Chrome when Playwright's own Chromium is
+  // not downloaded (`npx playwright install` refused, or a repo that pins `channel: 'chrome'`).
+  const browser = await chromium.launch({
+    headless,
+    ...(process.env.TFP_CHANNEL ? { channel: process.env.TFP_CHANNEL } : {}),
+  });
   const ctx = await browser.newContext({
     viewport,
     ...(record && outDir ? { recordVideo: { dir: outDir, size: viewport } } : {}),
