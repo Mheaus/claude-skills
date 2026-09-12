@@ -51,8 +51,10 @@ git diff --cached | grep -inE \
 |-------|-------------|
 | [`pr`](pr/) | Create a new branch from the current changes and open a pull request. |
 | [`autopr`](autopr/) | Create a branch + PR on the sakuga-software org, wait for a Copilot/Claude-agent review, apply the suggestions, reply to each comment, then play a macOS notification when done. |
-| [`apply-reviews`](apply-reviews/) | Read GitHub Copilot's review comments on the current PR, apply coherent fixes, commit, push, and reply to each comment. |
+| [`apply-reviews`](apply-reviews/) | Lit les commentaires de **tous** les bots de revue sur la PR courante, applique ce qui est cohérent, anticipe le round suivant, commit, push et répond à chaque commentaire. |
 | [`ar`](apply-reviews/) | Raccourci → `apply-reviews`. |
+| [`monitor-apply-reviews`](monitor-apply-reviews/) | Mène une PR jusqu'au vert : surveille chaque round de revue à mesure qu'il arrive, applique les constats, corrige les checks rouges, relance un relecteur muet, et lève le `CHANGES_REQUESTED` resté en place. |
+| [`mar`](monitor-apply-reviews/) | Raccourci → `monitor-apply-reviews`. |
 | [`wn`](wn/) | What's next — PR mergée : sync main, liste les tâches Linear (Todo) du projet actif et recommande la meilleure. |
 | [`next`](next/) | Comme `wn`, mais autonome : sync main, choisit la tâche, la réserve dans Linear (In Progress) pour qu'aucun autre agent ne la prenne, l'implémente, et enchaîne sur `autopr` sans demander. |
 | [`simplify-comments`](simplify-comments/) | Réécrit les commentaires du changement en ASD-STE100 : phrases courtes, une idée chacune, voix active. Mesure avant de juger, fusionne les doublons, supprime ce qui redit le code, corrige ceux devenus faux. |

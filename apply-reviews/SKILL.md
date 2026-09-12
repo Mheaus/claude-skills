@@ -80,6 +80,44 @@ visible.
    - Edit the files to apply the accepted suggestions
    - Run any relevant formatters if the project uses one (check package.json scripts)
    - Verify the changes don't break anything by running the relevant checks (lint, typecheck, test, etc.) if feasible
+   - **Verify each fix in both directions.** A fix is verified when its test fails *without* it: run
+     the suite against the pre-fix code, confirm red, restore, confirm green. A test that passes
+     either way pins nothing, and a reviewer asking for "a regression test" is asking for one that
+     discriminates. Keep a copy of the fixed file before reverting — `git checkout <file>` takes the
+     whole file back to its committed state, uncommitted work included.
+   - Read exit codes, not output patterns. `cmd >/dev/null 2>&1 && echo OK || echo FAIL` survives a
+     tool changing its wording; grepping for one phrase gives a false green the day it changes.
+
+5b. **Anticipate the next review — before you push**
+
+   **A reviewer's finding is a sample, not the population.** Most second rounds are the same defect
+   in its other half, which was there all along. Two minutes on this list, fixed in the same commit,
+   is what removes the round that would otherwise follow.
+
+   | You changed | Look at |
+   |---|---|
+   | an insert path | the update path on the same row, and the delete |
+   | a read guard | the write that reads the same value, and the reverse |
+   | a guard in a loader | the action beside it, and the endpoint behind both |
+   | one entry of a cache or map | every other collection that call was meant to empty |
+   | one branch of a conditional | the other branch, and the default |
+   | a function signature | every caller, the doc comment above it, and the module header examples |
+   | one column of a write | the constraints that write can now violate, and what a conflict answers |
+   | one member of a repeated pattern | the rest of the pattern, by grep — and say how many there are |
+
+   Two that are not about symmetry:
+
+   - **A mock you just added** — prove it takes effect by the same reversal. A mock pointed at a
+     barrel while the code imports the module directly replaces nothing, and the suite passes for a
+     reason unrelated to it.
+   - **A premise you are about to skip a finding on** — check it against the running system, not
+     only the source: a schema constraint against the live database, a runtime value by executing
+     the path. A finding worth skipping often sits next to a real defect it named wrongly.
+
+   Say the result in the reply, the negative included: "checked the update path and the delete
+   alongside the insert; only the insert could reach it, because …". That sentence is what stops the
+   follow-up round, and it is honest in a way "fixed" is not — it says what was examined, not only
+   what changed.
 
 6. **Commit and push**:
    - Stage modified files explicitly by name
@@ -141,8 +179,15 @@ visible.
 ## Important
 
 - Never apply a suggestion blindly — read the surrounding code and understand the impact first.
-- If the commit fails due to pre-commit hooks, fix the issues and create a NEW commit (do not amend).
+- If the commit fails due to pre-commit hooks, **find out which target failed** before retrying, then
+  fix it and create a NEW commit (do not amend). Retrying blind treats a real failure as a flake, and
+  the second failure costs more than reading the first would have.
 - Never force push or use `--no-verify`.
 - If a suggestion conflicts with another, pick the most coherent one and explain.
 - **Never conclude on the first review alone.** Step 8 is the step that caught a defect the first
   reviewer had missed; treating it as optional is how that happens again.
+- **A review confirming your fix does not lift its `CHANGES_REQUESTED`.** A pull request can have
+  every finding answered, every check green, and still be unmergeable. Check the review state as
+  well as the threads, and say in the report what it still needs.
+- When the user wants this carried all the way to green rather than one or two rounds — every round
+  as it lands, failing checks included, idle reviewers nudged — use **`/mar`** instead.
