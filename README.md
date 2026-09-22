@@ -50,13 +50,14 @@ git diff --cached | grep -inE \
 | Skill | Description |
 |-------|-------------|
 | [`pr`](pr/) | Create a new branch from the current changes and open a pull request. |
-| [`autopr`](autopr/) | Create a branch + PR on the sakuga-software org, wait for a Copilot/Claude-agent review, apply the suggestions, reply to each comment, then play a macOS notification when done. |
-| [`apply-reviews`](apply-reviews/) | Lit les commentaires de **tous** les bots de revue sur la PR courante, applique ce qui est cohérent, anticipe le round suivant, commit, push et répond à chaque commentaire. |
+| [`autopr`](autopr/) | Crée la branche et la PR sur l'org sakuga-software, attend tous les relecteurs (y compris les tardifs), distingue un refus pour quota d'une revue, répond aux bots et aux personnes, valide l'UI avec `/tfp` ou `/tf` (obligatoire après un changement d'UI significatif), puis notifie sous macOS. |
+| [`apply-reviews`](apply-reviews/) | Lit les commentaires de **tous** les bots et des personnes sur la PR courante, applique ce qui est cohérent, anticipe le round suivant, commit, push et répond à chaque commentaire. Porte la règle partagée sur les quotas des relecteurs (`reviewer-availability.md`) et les scripts `pr-signals.sh` / `pr-watch.sh`. |
 | [`ar`](apply-reviews/) | Raccourci → `apply-reviews`. |
-| [`monitor-apply-reviews`](monitor-apply-reviews/) | Mène une PR jusqu'au vert : surveille chaque round de revue à mesure qu'il arrive, applique les constats, corrige les checks rouges, relance un relecteur muet, et lève le `CHANGES_REQUESTED` resté en place. |
+| [`monitor-apply-reviews`](monitor-apply-reviews/) | Mène une PR jusqu'au vert : surveille chaque round de revue, chaque commentaire d'une personne et chaque check, applique les constats, corrige les checks rouges, relance un relecteur muet sans relancer un relecteur à court de quota (une fois, au moins une minute après l'heure de retour annoncée), et lève le `CHANGES_REQUESTED` resté en place. |
 | [`mar`](monitor-apply-reviews/) | Raccourci → `monitor-apply-reviews`. |
 | [`wn`](wn/) | What's next — PR mergée : sync main, liste les tâches Linear (Todo) du projet actif et recommande la meilleure. |
 | [`next`](next/) | Comme `wn`, mais autonome : sync main, choisit la tâche, la réserve dans Linear (In Progress) pour qu'aucun autre agent ne la prenne, l'implémente, et enchaîne sur `autopr` sans demander. |
+| [`autonext`](autonext/) | Enchaîne des `next` sans intervention : prend, réserve, construit et livre une tâche après l'autre, empile les PR quand une tâche dépend d'une PR non mergée, et s'arrête quand plus aucun ticket n'est prenable en autonomie ou que la PR suivante ne peut plus s'empiler. |
 | [`simplify-comments`](simplify-comments/) | Réécrit les commentaires du changement en ASD-STE100 : phrases courtes, une idée chacune, voix active. Mesure avant de juger, fusionne les doublons, supprime ce qui redit le code, corrige ceux devenus faux. |
 | [`sc`](simplify-comments/) | Raccourci → `simplify-comments`. |
 

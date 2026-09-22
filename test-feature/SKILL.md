@@ -125,7 +125,7 @@ GIFs are hosted on a self-hosted MinIO instance (`s3.deploy.sakuga.dev`, Dokploy
 
 3. **If a PR exists**, post it as a comment:
    ```bash
-   gh pr comment "$PR_NUMBER" --body "$(printf '### Test recording\n\n![%s](%s)\n' "<feature name>" "$PUBLIC_URL")"
+   gh pr comment "$PR_NUMBER" --body "$(printf '### Test recording\n\n![%s](%s)\n\n<!-- claude-reply -->\n' "<feature name>" "$PUBLIC_URL")"
    ```
    Confirm the comment posted (`gh pr view --json comments`) and note the comment URL for the report.
 

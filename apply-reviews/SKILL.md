@@ -1,6 +1,6 @@
 ---
 name: apply-reviews
-description: Read the review comments from every bot on the current PR (waiting for the late ones too), apply coherent fixes, commit, push, reply to each comment, and validate in a browser when the fixes touched something visible.
+description: Read the review comments from every bot and every person on the current PR (waiting for the late ones too, and telling a quota refusal from a review), apply coherent fixes, commit, push, reply to each comment, and validate in a browser with /tfp or /tf when the fixes touched the UI.
 argument-hint: [pr-number]
 ---
 
@@ -8,6 +8,10 @@ Read the review comments left by **every** review bot on the current PR — incl
 have not answered yet — apply the ones you judge coherent, commit and push, reply to each comment
 with the detail of the fix, and look at the result in a browser when the fixes changed something
 visible.
+
+**Read [`reviewer-availability.md`](reviewer-availability.md) first.** It holds the two scripts this
+skill uses (`scripts/pr-signals.sh`, `scripts/pr-watch.sh`), the marker to put in each reply, the
+rules for a reviewer that is out of quota, and the rules for comments from people.
 
 ## Steps
 
@@ -36,24 +40,24 @@ visible.
      often already in — list them **all** and carry the whole set into step 3, because working only
      the one you noticed is exactly the failure this step exists to prevent:
      ```bash
-     gh api repos/<owner>/<repo>/pulls/<number>/reviews \
-       --jq '.[] | select(.user.login | endswith("[bot]")) | "\(.user.login) \(.state) \(.submitted_at)"'
+     PR=<number> REPO=<owner>/<repo> ~/.claude/skills/apply-reviews/scripts/pr-signals.sh
      ```
-   - If the check returns nothing, start a Monitor that polls every 30s and emits a single line
-     the moment a bot submits a review. Exit the Monitor immediately after the first event:
+   - **Sort the reviewers before you wait for them.** A `review … quota` line or a
+     `conversation … quota` line is a refusal, not a review. Apply
+     [`reviewer-availability.md`](reviewer-availability.md): no request to a reviewer with no return
+     time, and at most one request, at least one minute after its `until=`, to a reviewer with one.
+     If every reviewer refused, say so and stop. Do not wait for a review that cannot come.
+   - If no real review is in yet, start a Monitor that stops at the first real bot review or the
+     first comment from a person. A quota line does not stop it:
      ```bash
-     # description: "bot review on PR <n>"
+     # description: "PR <n>: waiting for a review"
      # timeout_ms: 600000   # 10 min cap
-     until out=$(gh api repos/<owner>/<repo>/pulls/<number>/reviews \
-         --jq '.[] | select(.user.login | endswith("[bot]")) | "\(.user.login) \(.state) \(.submitted_at)"' 2>/dev/null) \
-         && [ -n "$out" ]; do
-       sleep 30
-     done
-     echo "$out"
+     PR=<number> REPO=<owner>/<repo> \
+     UNTIL='^review [^ ]+ [A-Z_]+ [0-9a-f]{8} [^ ]+ bot$| human( reply)?$' \
+       ~/.claude/skills/apply-reviews/scripts/pr-watch.sh
      ```
-     The single stdout line is your notification — Monitor surfaces it and exits. Exiting on the
-     first one is fine *here*, because step 8 does the waiting once the fixes are pushed and the
-     wall-clock costs nothing.
+     Exiting on the first one is fine *here*, because step 8 does the waiting once the fixes are
+     pushed and the wall-clock costs nothing.
    - If the Monitor times out without an event, ask the user whether to proceed anyway or abort. Do not fall back to direct polling (silent loops burn context).
 
 3. **Fetch the review comments**:
@@ -65,9 +69,18 @@ visible.
    ```
    `in_reply_to_id == null` keeps only top-level comments — replies are yours or threaded
    follow-ups, and re-processing them wastes a round.
-   - Also read the **review bodies** from step 2 and run `gh pr checks <number>`: a bot may put
-     its finding in the body rather than on a line, and may publish a **check of its own** that
-     fails. A failing review check with no line comment still means something needs answering.
+   - **Read the comments of people too.** The filter above keeps bots only. Line comments and
+     conversation comments tagged `human` by `pr-signals.sh` come first: a question, a request, an
+     instruction such as "do not merge" (see [`reviewer-availability.md`](reviewer-availability.md)).
+     Read them with `gh api …/pulls/<n>/comments/<id>` and `gh api …/issues/comments/<id>`.
+   - **A bot reply in a thread you answered** can confirm, or ask for one more change. It is part of
+     the round.
+   - Also read the **review bodies** from step 2 (`gh api --paginate …/reviews`, `/reviews` pages
+     at 30) and run `gh pr checks <number>`: a bot may put its finding in the body rather than on a
+     line, and may publish a **check of its own** that fails. Copilot hides real findings in a
+     « Suppressed comments » section of the body with **no thread** — a review with « Comments
+     generated: 0 » can still carry three. A failing review check with no line comment still means
+     something needs answering.
    - If nothing actionable turns up anywhere, inform the user and stop.
 
 4. **Analyse each comment**:
@@ -130,55 +143,59 @@ visible.
    - For each applied fix: reply with the commit SHA and a short description of what was changed
    - For each skipped suggestion: reply explaining why it was skipped
    - Use `gh api repos/<owner>/<repo>/pulls/<number>/comments -f body="<reply>" -F in_reply_to=<comment_id>`
+   - End each body with `<!-- claude-reply -->`. The watch then knows it is yours and not the user's.
+   - Answer the comments of people in the same way, in their thread or in the conversation.
 
 8. **Come back for the reviewers who were still thinking**:
    - The push you just made answers the reviewers you had, and often triggers a fresh review of the
      new commit. Meanwhile a second bot may still be working on the original diff. Watch again now —
      the useful work is already on the branch, so the wait costs nothing but wall-clock.
-   - Monitor until it has been **quiet for 10 minutes**, capped at 25, emitting only what is new:
+   - Monitor until it has been **quiet for 10 minutes with settled checks**, capped at 25. The watch
+     prints every new signal: reviews, line comments and replies, conversation comments (people
+     included), quota notices, and checks.
      ```bash
-     # description: "PR <n>: watching for late reviewers"
+     # description: "PR <n>: watching for late reviewers, comments and checks"
      # timeout_ms: 1500000   # 25 min cap
-     reviewers() {
-       gh api repos/<owner>/<repo>/pulls/<number>/reviews \
-         --jq '.[] | select(.user.login | endswith("[bot]")) | "\(.user.login) \(.submitted_at)"' 2>/dev/null | sort -u
-     }
-     seen=$(reviewers); quiet=0
-     echo "already in: ${seen:-none}"
-     while [ "$quiet" -lt 600 ]; do
-       sleep 30
-       now=$(reviewers)
-       if [ "$now" != "$seen" ]; then
-         comm -13 <(echo "$seen") <(echo "$now")
-         seen=$now; quiet=0
-       else
-         quiet=$((quiet + 30))
-       fi
-     done
-     echo "quiet for 10 minutes, done watching"
+     EXPECT='<a real CI check>' PR=<number> REPO=<owner>/<repo> ~/.claude/skills/apply-reviews/scripts/pr-watch.sh
      ```
+     The quiet time counts only when the head commit has checks and none is pending. CI can start
+     many minutes after a push, and a watch that counts before then ends before the checks exist.
    - If anything new lands, **go back to step 3** for the new comments only — `in_reply_to_id == null`
      plus "skip what I have already answered" keeps old threads from being re-processed.
+   - A new quota notice updates the return time. Apply
+     [`reviewer-availability.md`](reviewer-availability.md) again: ask at least one minute after the
+     new `until=`, and only if no review of the head arrived by itself.
+   - A failing check is part of the answer: read its log. A check that is red only because of a
+     quota refusal is not a failure of the PR.
    - Two rounds is the norm. Before starting a third, stop and tell the user: a reviewer that finds
      something new on every pass is saying something about the change, not filling a queue.
 
-9. **Look at it, if the fixes touched something visible**:
-   - A review comment applied to UI code deserves the same treatment as the feature itself: if this
-     repo can serve a page that exercises what you changed, run **`/tfp`** and post the recording to
-     the PR. Drive it through the real UI, and include the awkward state the comment was about.
-   - If the fixes were server-side, internal, or there is no page to serve, say so in the report
-     rather than skipping it silently.
+9. **Look at it — mandatory when the fixes changed the UI significantly**:
+   - **A significant UI change** is a change to what a person sees or does: a component, a layout, a
+     copy that changes the meaning, a new state (empty, error, loading), a form, a modal, a
+     navigation. A class rename with no visible effect is not significant.
+   - If the fixes made such a change, **run `/tfp`** (or `/tf` if the Playwright harness cannot
+     reach the page) and post the recording to the PR. This is not optional, and a green check does
+     not replace it. Drive it through the real UI, and include the awkward state the comment was
+     about.
+   - If the fixes were server-side, internal, or only cosmetic in the code, say so in the report
+     with the reason. Do not skip the step in silence.
 
 10. **Report to the user**:
     - List each comment and whether it was applied or skipped (with reason), **grouped by
       reviewer**, so it is visible that more than one looked
     - Say how many rounds there were, and whether step 8 ended quiet or hit its cap — "nobody else
       reviewed" and "I stopped waiting" are different facts
+    - Name each reviewer that refused because of a quota, with its return time or "no return time".
+      Never write "no findings" for a refusal.
+    - List the comments of people and what you did with each
     - Include the commit SHA, the PR URL, and the recording from step 9 (or why there is none)
 
 ## Important
 
 - Never apply a suggestion blindly — read the surrounding code and understand the impact first.
+- Never ask a reviewer again that is out of quota with no return time. Never ask before one minute
+  after its return time, and never more than once for each notice.
 - If the commit fails due to pre-commit hooks, **find out which target failed** before retrying, then
   fix it and create a NEW commit (do not amend). Retrying blind treats a real failure as a flake, and
   the second failure costs more than reading the first would have.

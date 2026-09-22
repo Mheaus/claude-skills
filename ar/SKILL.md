@@ -1,6 +1,6 @@
 ---
 name: ar
-description: Shortcut for /apply-reviews — read GitHub Copilot's review comments on the current PR, apply coherent fixes, commit, push, and reply to each comment. Use when the user types /ar.
+description: Shortcut for /apply-reviews — read the review comments of every bot and every person on the current PR (a quota refusal is not a review), apply coherent fixes, commit, push, and reply to each comment. Use when the user types /ar.
 argument-hint: [pr-number]
 ---
 

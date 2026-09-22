@@ -144,8 +144,13 @@ Then `gh pr comment` it (or attach to Linear if no PR), embedding by kind:
   <video src="<PUBLIC_URL>" controls muted></video>
 
   ([vidéo webm](<PUBLIC_URL>) si le lecteur ne s'affiche pas)
+
+  <!-- claude-reply -->
   ```
-- **gif** → the usual image embed: `![<feature>](<PUBLIC_URL>)`
+- **gif** → the usual image embed: `![<feature>](<PUBLIC_URL>)`, then the same marker line.
+
+The marker `<!-- claude-reply -->` tells the review watch that the comment is the agent's, not the
+user's (see `apply-reviews/reviewer-availability.md`).
 
 Confirm the comment landed (`gh pr view --json comments`), then write the concise test report (URL, artifact link, Passed / Issues found / Not tested). Reuse `test-feature`'s exact Keychain/upload/comment commands otherwise — do not reinvent them.
 

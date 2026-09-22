@@ -1,10 +1,14 @@
 ---
 name: autopr
-description: Create a branch + PR on the sakuga-software org, wait for the review bots (all of them, including the late ones), apply the suggestions, reply to each comment, validate visually with /tfp when there is a surface to look at, then play a macOS notification + sound when done.
+description: Create a branch + PR on the sakuga-software org, wait for the review bots (all of them, including the late ones, and telling a quota refusal from a review), apply the suggestions, answer each comment from a bot or a person, validate visually with /tfp or /tf (mandatory after a significant UI change), then play a macOS notification + sound when done.
 argument-hint: [branch-name]
 ---
 
 End-to-end flow: open a PR against the `sakuga-software` remote, request reviews from both `Copilot` and `anthropic-code-agent`, apply coherent suggestions and reply to each comment — **for every reviewer, not just the first one to answer** — validate the change in a real browser when it has a visual surface, and trigger a macOS notification + system sound.
+
+**Read [`../apply-reviews/reviewer-availability.md`](../apply-reviews/reviewer-availability.md)
+first.** It gives the two scripts the waits below use, the marker for each reply, the quota rules and
+the rules for comments from people.
 
 ## Steps
 
@@ -46,7 +50,7 @@ End-to-end flow: open a PR against the `sakuga-software` remote, request reviews
 - Capture the PR number and URL.
 
 ### 5. Request reviews from both bots
-Some repos auto-review; some don't. Request both explicitly (ignore errors — one or both may not be collaborators).
+Some repos auto-review; some don't. Request both explicitly (ignore errors — one or both may not be collaborators). **Exception:** if this session already saw a reviewer refuse for quota with no return time, or with a return time that is not past yet, do not request it. The request uses nothing useful, and the report says why it was not asked.
 ```bash
 gh api --method POST repos/<owner>/<repo>/pulls/<n>/requested_reviewers \
   -f 'reviewers[]=copilot-pull-request-reviewer[bot]' 2>/dev/null || true
@@ -65,22 +69,20 @@ gh api --method POST repos/<owner>/<repo>/pulls/<n>/requested_reviewers \
 - `/pulls/<n>/comments` — the same bot may use a *different* login here: Copilot posts line comments as plain `Copilot`, with no suffix. Most others keep theirs, which is why the filter needs both forms.
 - **The PR author appears on both**, including your own replies, so filter those out or you will re-process what you already answered.
 
-Single immediate check first — skip the Monitor if a review is already there:
+Single immediate check first — skip the Monitor if a real review is already there:
 ```bash
-gh api repos/<owner>/<repo>/pulls/<n>/reviews \
-  --jq '.[] | select(.user.login | endswith("[bot]")) | "\(.user.login) \(.state) \(.submitted_at)"'
+PR=<n> REPO=<owner>/<repo> ~/.claude/skills/apply-reviews/scripts/pr-signals.sh
 ```
 
-If empty, start a Monitor that polls every 30s and exits on the first event:
+**A quota refusal is not a review.** A line tagged `quota` (a review body, the bot's first conversation comment, a check or a status) means that reviewer will not review now. Record it with its `until=`, or as "no return time", and apply `reviewer-availability.md`. If every reviewer refused, skip the wait, say so in the report, and go on to 10c.
+
+If no real review is in yet, start a Monitor that stops at the first real bot review or the first comment from a person — a quota line does not stop it:
 ```bash
-# description: "PR <n>: waiting for a bot review"
+# description: "PR <n>: waiting for a review"
 # timeout_ms: 900000   # 15 min cap
-until out=$(gh api repos/<owner>/<repo>/pulls/<n>/reviews \
-    --jq '.[] | select(.user.login | endswith("[bot]")) | "\(.user.login) \(.state) \(.submitted_at)"' 2>/dev/null) \
-    && [ -n "$out" ]; do
-  sleep 30
-done
-echo "$out"
+PR=<n> REPO=<owner>/<repo> \
+UNTIL='^review [^ ]+ [A-Z_]+ [0-9a-f]{8} [^ ]+ bot$| human( reply)?$' \
+  ~/.claude/skills/apply-reviews/scripts/pr-watch.sh
 ```
 If the Monitor times out, ask the user whether to proceed anyway. Do not fall back to a raw polling loop.
 
@@ -93,6 +95,8 @@ gh api repos/<owner>/<repo>/pulls/<n>/comments \
             | {id, user: .user.login, path, line, body}'
 ```
 `in_reply_to_id == null` keeps only top-level comments — replies are yours or threaded follow-ups.
+
+Also read the comments tagged `human` in the step 6 output — line comments and conversation comments of people. They come before the bot findings: answer a question, treat a request as a finding, follow an instruction such as "do not merge" at once, and ask the user when a comment needs a decision.
 
 Also read the **review bodies** (step 6 output) and `gh pr checks <n>`: a review bot may post its finding in the body rather than on a line, and it may publish a **check of its own** that fails. A failing review check with no line comment still means there is something to answer.
 
@@ -116,45 +120,34 @@ If nothing actionable turns up anywhere, say so and go on to **10b** — a quiet
   - Skipped → reply explaining why.
   ```bash
   gh api repos/<owner>/<repo>/pulls/<n>/comments \
-    -f body="<reply>" -F in_reply_to=<comment_id>
+    -f body="<reply>
+  <!-- claude-reply -->" -F in_reply_to=<comment_id>
   ```
+- End **every** body you post (reply, PR comment) with `<!-- claude-reply -->`. You post with the user's login, and the marker is what keeps the watch from reading your reply as a comment of the user.
 
 ### 10b. Come back for the reviewers who were still thinking
 
 The push you just made does two things: it answers the first reviewer, and it often triggers a fresh review of the new commit. Meanwhile a second bot may still be working on the original diff. So after pushing, watch again — this is where the wall-clock wait belongs, because the useful work is already done and on the branch.
 
-Start a Monitor that reports the reviewer set and stops once it has been **quiet for 10 minutes**, capped at 25:
+Start a Monitor that prints every new signal — reviews, line comments and replies, conversation comments (people included), quota notices, checks — and stops once it has been **quiet for 10 minutes with settled checks**, capped at 25:
 ```bash
-# description: "PR <n>: watching for late reviewers"
+# description: "PR <n>: watching for late reviewers, comments and checks"
 # timeout_ms: 1500000   # 25 min cap
-reviewers() {
-  gh api repos/<owner>/<repo>/pulls/<n>/reviews \
-    --jq '.[] | select(.user.login | endswith("[bot]")) | "\(.user.login) \(.submitted_at)"' 2>/dev/null | sort -u
-}
-seen=$(reviewers); quiet=0
-echo "already in: ${seen:-none}"
-while [ "$quiet" -lt 600 ]; do
-  sleep 30
-  now=$(reviewers)
-  if [ "$now" != "$seen" ]; then
-    comm -13 <(echo "$seen") <(echo "$now")   # emit only what is new
-    seen=$now; quiet=0
-  else
-    quiet=$((quiet + 30))
-  fi
-done
-echo "quiet for 10 minutes, done watching"
+EXPECT='<a real CI check>' PR=<n> REPO=<owner>/<repo> ~/.claude/skills/apply-reviews/scripts/pr-watch.sh
 ```
+The quiet time counts only when the head has checks and none is pending: CI can register its checks many minutes after a push.
+
+A reviewer that announced a return time is asked **once, at least one minute after that time**, and only if no review of the head arrived by itself. A reviewer that refused with no return time is not asked again. A new quota notice gives a new time; do not ask in a loop.
 
 If anything new lands, **go back to step 7** and run the loop again — fetch, judge, apply, push, reply — for the new comments only. `in_reply_to_id == null` plus "skip what I have already answered" is what keeps this from re-processing old threads.
 
 Two rounds of this is the norm. If a third would start, stop and tell the user instead: a reviewer that keeps finding new things on every pass is a signal about the change, not a queue to drain.
 
-### 10c. Look at it, when there is something to look at
+### 10c. Look at it — mandatory after a significant UI change
 
 A green check says the code does what the tests say. It does not say the thing looks right, and the tests are written by whoever also wrote the bug.
 
-**If the change has a visual surface, validate it with `/tfp`** and post the recording to the PR. A visual surface means: this repo can serve a page that exercises the change — a dev server, a playground, a demo route, a component the app already renders. UI, overlays, layout, styling, anything a person would *look* at.
+**If the change has a visual surface, validate it with `/tfp`** (or `/tf` if the Playwright harness cannot reach the page) and post the recording to the PR. **This is mandatory** when the PR, or a review round, changed what a person sees or does: a component, a layout, a copy that changes the meaning, a new state, a form, a modal, a navigation. A review round that changes the UI after the first recording needs a new recording of that change. A visual surface means: this repo can serve a page that exercises the change — a dev server, a playground, a demo route, a component the app already renders. UI, overlays, layout, styling, anything a person would *look* at.
 
 - Run `/tfp`, which drives Playwright's own Chromium, records the run, uploads it and comments on the PR. Follow that skill; do not reimplement it here.
 - Drive the change **through its real UI**, not through injected JavaScript — a click on the button, not a call to the function behind it. Otherwise it validates the harness rather than the feature.
@@ -173,6 +166,8 @@ The `sound name "Glass"` in the notification already plays a sound, but `afplay`
 ### 12. Report to the user
 - List each comment → applied (with SHA) or skipped (with reason), **grouped by reviewer**, so it is visible that more than one looked.
 - Say how many review rounds there were, and whether the watch in 10b ended quiet or hit its cap — "no second reviewer showed up" and "I stopped waiting" are different facts.
+- Name each reviewer that refused for quota, with its return time or "no return time". A refusal is never "no findings".
+- List the comments of people and what you did with each.
 - Include the PR URL, the final commit SHA, and the recording from 10c — or the one-line reason there is none.
 
 ## Important

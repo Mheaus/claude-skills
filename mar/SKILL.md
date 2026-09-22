@@ -1,6 +1,6 @@
 ---
 name: mar
-description: Shortcut for /monitor-apply-reviews — stay on the current PR until it is green, applying each review round as it lands, fixing failing checks, and asking idle reviewers for a pass. Use when the user types /mar.
+description: Shortcut for /monitor-apply-reviews — stay on the current PR until it is green, applying each review round and each comment from a person as it lands, fixing failing checks, and asking idle reviewers for a pass without spending a quota that is used up. Use when the user types /mar.
 argument-hint: [pr-number]
 ---
 

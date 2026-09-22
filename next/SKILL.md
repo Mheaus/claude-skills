@@ -36,14 +36,16 @@ A ticket you are working on but have not claimed is a ticket another agent will 
 
 ### 5. Start it
 - Create the branch from Linear's suggested name: `git checkout -b <gitBranchName>`.
-- Implement, following the repo conventions (CLAUDE.md), and verify (typecheck/lint/test, and a browser check when it's UI).
+- Implement, following the repo conventions (CLAUDE.md), and verify (typecheck/lint/test).
+- **If the task changes the UI significantly, run `/tfp` before `/autopr`** (or `/tf` if the Playwright harness cannot reach the page). A significant UI change is a change to what a person sees or does: a component, a layout, a copy that changes the meaning, a new state, a form, a modal, a navigation. This is mandatory: a green typecheck says nothing about what the page shows. If the recording shows a defect, fix it before you open the PR.
 - **Open questions in the ticket:** since this is autonomous, don't stall — make the sensible default, implement it, and clearly flag the decision in your summary and in the eventual PR body so the user can override.
 
 ### 6. Ship it — chain into `/autopr`
-Once the task is implemented and verified (typecheck/lint/test green, browser-checked when UI):
+Once the task is implemented and verified (typecheck/lint/test green, `/tfp` recorded when the UI changed significantly):
 1. Commit the work locally on the task branch (repo commit style, `Co-Authored-By: Claude <noreply@anthropic.com>`).
 2. **Invoke the `/autopr` skill** to push, open the PR against the `sakuga-software` remote, request both bot reviews, wait for the first review, apply coherent suggestions, reply to each comment, and fire the macOS notification. Follow its steps in full — do not re-implement them here.
 3. After `/autopr` completes, summarise: what you built, the decisions you made (with defaults you chose for any open questions), the PR URL, and which review suggestions were applied/skipped.
+4. `/autopr` does one or two rounds. A PR is not green after the first quiet window: reviewers re-review every push, and Copilot hides findings in the review body (« Suppressed comments », no thread). Hand the PR to `/mar` and let it run to green; that is where the loop, the checks and the stale « changes requested » are handled. When a review round changes the UI significantly, `/autopr` and `/mar` record it again with `/tfp`: the first recording does not cover it.
 
 This is the one exception to "outward actions need a go-ahead": running `/next` **is** the go-ahead to take the task all the way to an open, review-processed PR.
 
