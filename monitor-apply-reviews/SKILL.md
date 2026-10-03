@@ -139,8 +139,8 @@ tool changing its wording; grepping for one phrase gives a false green the day i
 
 ```bash
 # description: "PR <n>: round <i>, waiting for reviews, comments and checks"
-# timeout_ms: 1500000   # 25 min cap
-EXPECT='<a real CI check>' PR=<n> REPO=<owner>/<repo> ~/.claude/skills/apply-reviews/scripts/pr-watch.sh
+# timeout_ms: 2700000   # 45 min cap
+QUIET=1200 EXPECT='<a real CI check>' PR=<n> REPO=<owner>/<repo> ~/.claude/skills/apply-reviews/scripts/pr-watch.sh
 ```
 
 The watch prints each new signal: a review, a line comment or a reply, a conversation comment (a
@@ -153,6 +153,11 @@ many minutes after a push. A watch that counts during that gap stops before the 
 the loop then reads "quiet" as "green". A reviewer status can arrive in seconds and look like a
 settled check alone: pass `EXPECT` (a regex of the CI check names, from `reference.local.md` or from
 the checks of the last PR on the base branch) so the quiet time waits for real CI.
+
+The watch stops after 20 minutes of quiet with settled checks. The cap is 45 minutes. Measured on
+2026-08-14/15 across four pull requests: the second reviewer landed 14, 25, 28 and 33 minutes after
+a push. A ten-minute window closed just before it each time. Two of those late findings were real
+functional defects.
 
 The watch stops on quiet, maybe before a far `until=`. If a reviewer still owes a review at that
 time, start a Monitor that sleeps until one minute after `until=`, then read the head again and ask
