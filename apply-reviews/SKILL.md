@@ -150,16 +150,22 @@ rules for a reviewer that is out of quota, and the rules for comments from peopl
    - The push you just made answers the reviewers you had, and often triggers a fresh review of the
      new commit. Meanwhile a second bot may still be working on the original diff. Watch again now —
      the useful work is already on the branch, so the wait costs nothing but wall-clock.
-   - Monitor until it has been **quiet for 10 minutes with settled checks**, capped at 25. The watch
+   - Monitor until it has been **quiet for 20 minutes with settled checks**, capped at 45. The watch
      prints every new signal: reviews, line comments and replies, conversation comments (people
      included), quota notices, and checks.
      ```bash
      # description: "PR <n>: watching for late reviewers, comments and checks"
-     # timeout_ms: 1500000   # 25 min cap
-     EXPECT='<a real CI check>' PR=<number> REPO=<owner>/<repo> ~/.claude/skills/apply-reviews/scripts/pr-watch.sh
+     # timeout_ms: 2700000   # 45 min cap
+     QUIET=1200 EXPECT='<a real CI check>' PR=<number> REPO=<owner>/<repo> ~/.claude/skills/apply-reviews/scripts/pr-watch.sh
      ```
      The quiet time counts only when the head commit has checks and none is pending. CI can start
      many minutes after a push, and a watch that counts before then ends before the checks exist.
+   - **Why twenty and not ten.** Measured on 2026-08-14/15 across four pull requests: the second
+     reviewer landed 14, 25, 28 and 33 minutes after a push, and **four times out of four it arrived
+     within minutes of a ten-minute window closing** — so the run reported "nobody else reviewed"
+     when the reviewer was still working, and the finding had to be collected by a later hand-run.
+     Two of those late findings were real functional defects. The wall-clock is free here; a window
+     that closes early is not.
    - If anything new lands, **go back to step 3** for the new comments only — `in_reply_to_id == null`
      plus "skip what I have already answered" keeps old threads from being re-processed.
    - A new quota notice updates the return time. Apply

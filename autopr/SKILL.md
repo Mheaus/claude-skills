@@ -129,13 +129,20 @@ If nothing actionable turns up anywhere, say so and go on to **10b** — a quiet
 
 The push you just made does two things: it answers the first reviewer, and it often triggers a fresh review of the new commit. Meanwhile a second bot may still be working on the original diff. So after pushing, watch again — this is where the wall-clock wait belongs, because the useful work is already done and on the branch.
 
-Start a Monitor that prints every new signal — reviews, line comments and replies, conversation comments (people included), quota notices, checks — and stops once it has been **quiet for 10 minutes with settled checks**, capped at 25:
+Start a Monitor that prints every new signal — reviews, line comments and replies, conversation comments (people included), quota notices, checks — and stops once it has been **quiet for 20 minutes with settled checks**, capped at 45:
 ```bash
 # description: "PR <n>: watching for late reviewers, comments and checks"
-# timeout_ms: 1500000   # 25 min cap
-EXPECT='<a real CI check>' PR=<n> REPO=<owner>/<repo> ~/.claude/skills/apply-reviews/scripts/pr-watch.sh
+# timeout_ms: 2700000   # 45 min cap
+QUIET=1200 EXPECT='<a real CI check>' PR=<n> REPO=<owner>/<repo> ~/.claude/skills/apply-reviews/scripts/pr-watch.sh
 ```
 The quiet time counts only when the head has checks and none is pending: CI can register its checks many minutes after a push.
+
+**Why twenty and not ten.** Measured on 2026-08-14/15 across four pull requests: the second reviewer
+landed 14, 25, 28 and 33 minutes after a push, and **four times out of four it arrived within minutes
+of a ten-minute window closing** — so the run reported "no second reviewer showed up" while that
+reviewer was still working, and its finding had to be collected by a later hand-run of `/ar`. Two of
+those late findings were real functional defects. The wall-clock costs nothing here; a window that
+closes early costs a review.
 
 A reviewer that announced a return time is asked **once, at least one minute after that time**, and only if no review of the head arrived by itself. A reviewer that refused with no return time is not asked again. A new quota notice gives a new time; do not ask in a loop.
 
