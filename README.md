@@ -43,6 +43,7 @@ git diff --cached | grep -inE \
 | [`markup-from-image`](markup-from-image/) | Convert screenshots, Figma exports, mockups, or wireframes into semantic unstyled markup. |
 | [`add-dark-mode`](add-dark-mode/) | Add dark mode with colors, shadows, and surfaces handled the way a designer would. |
 | [`dark-mode-image`](dark-mode-image/) | Create dark-mode variants of raster images for dark UI contexts. |
+| [`ui-polish`](ui-polish/) | Corrige les détails d'UI subtilement cassés (cartes cliquables accessibles, rayons concentriques, icône alignée sur la 1re ligne, zones tactiles, tableaux scrollables, menus en subgrid), d'après le cours *Build UIs that don't suck* d'Adam Wathan. |
 | [`canonicalize-tailwind`](canonicalize-tailwind/) | Sort, normalize, deduplicate, and resolve conflicting Tailwind utility classes. |
 | [`brand-kit`](brand-kit/) | Generate a complete visual identity and marketing-site mockup board from a product idea. |
 
