@@ -6,7 +6,6 @@ Ce repo est cloné dans `~/.claude/skills` sur les deux machines.
 Pour synchroniser : `cd ~/.claude/skills && git pull` (ou `git push` après ajout/modif d'un skill).
 
 - `ar` → symlink relatif vers `apply-reviews`
-- `test-feature` : version Mac mini (upload GIF PR/Linear)
 
 ## ⚠️ Ce repo est public — les skills restent génériques
 
@@ -66,10 +65,9 @@ git diff --cached | grep -inE \
 ### Tests
 | Skill | Description |
 |-------|-------------|
-| [`test-feature`](test-feature/) | Test the current feature via Claude in Chrome (git diff → dev server → drive the app → GIF → upload PR/Linear). |
-| [`tf`](tf/) | Raccourci → `test-feature`. |
-| [`test-feature-pw`](test-feature-pw/) | Test the current feature via a Playwright script (no Chrome extension / no permission gate → dev server → run script → webm ≤5 Mo, sinon GIF → upload PR/Linear). |
-| [`tfp`](tfp/) | Raccourci → `test-feature-pw`. |
+| [`test-feature`](test-feature/) | Teste le changement par sa vraie interface (page, CLI, API, app) : démarre et arrête l'environnement de dev (`scripts/devenv.sh`), enregistre la preuve, la publie sur MinIO avec un lien sur la PR ou Linear (`scripts/publish.sh`). |
+| [`tf`](tf/) | Raccourci → `test-feature`, pilote Claude in Chrome. |
+| [`tfp`](tfp/) | Raccourci → `test-feature`, pilotes par défaut (Playwright pour une page). |
 
 ### Scaleway
 | Skill | Description |

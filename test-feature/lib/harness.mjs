@@ -1,25 +1,40 @@
-// Reusable Playwright harness for the `test-feature-pw` (/tfp) skill.
+// Playwright harness of the `test-feature` skill (/tf, /tfp): the web driver.
 //
-// Why this exists: Claude-in-Chrome drives a real browser through an extension
-// whose permission gate is flaky (frequent "Permission denied by user") and
-// whose captured viewport can get pinned (the 500px `resize_window` gotcha).
-// Playwright drives its own Chromium — no extension, no gate, exact viewport,
-// native video recording. This module carries the boilerplate (launch, dev
-// login, active-org, console/network capture, webm→gif) so a per-feature runner
-// script only has to express the interactions + assertions.
+// It launches Chromium, records a video, and keeps the console errors, the page errors and the
+// HTTP answers of 400 and more. A runner script of one feature imports it and keeps only the
+// steps and the checks. See ../drivers.md for when to use it.
 //
-// Playwright is installed GLOBALLY on this machine (not a repo dependency), so
-// we resolve it from the global node_modules via createRequire. `chromium` is
-// re-exported for runners that want the raw API.
+// Playwright comes from the project under test first (the cwd of the runner, or TFP_PROJECT),
+// then from TFP_PW_GLOBAL, then from the global node_modules of npm.
 
 import { createRequire } from 'node:module';
 import { execSync } from 'node:child_process';
-import { readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-const PW_GLOBAL = process.env.TFP_PW_GLOBAL ?? '/opt/homebrew/lib/node_modules/';
-const require = createRequire(PW_GLOBAL);
-export const { chromium } = require('playwright');
+function loadPlaywright() {
+  const roots = [process.env.TFP_PROJECT, process.cwd(), process.env.TFP_PW_GLOBAL];
+  try {
+    roots.push(execSync('npm root -g', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim());
+  } catch {}
+  const tried = [];
+  for (const root of roots.filter(Boolean)) {
+    for (const name of ['playwright', '@playwright/test']) {
+      try {
+        const from = existsSync(join(root, 'package.json')) ? join(root, 'package.json') : join(root, 'noop.js');
+        return createRequire(from)(name);
+      } catch {
+        tried.push(`${name} from ${root}`);
+      }
+    }
+  }
+  throw new Error(
+    `test-feature: Playwright not found. Tried: ${tried.join('; ')}. ` +
+      'Run the runner from the project directory, or set TFP_PROJECT or TFP_PW_GLOBAL.',
+  );
+}
+
+export const { chromium } = loadPlaywright();
 
 // Nothing project-specific is baked in: a default port or container name that only
 // fits one repo fails silently everywhere else (wrong port → a timeout that looks
@@ -38,11 +53,11 @@ export const DEFAULTS = {
 
 function required(value, name, hint) {
   if (value) return value;
-  throw new Error(`test-feature-pw: ${name} is required. ${hint}`);
+  throw new Error(`test-feature: ${name} is required. ${hint}`);
 }
 
 /**
- * Launch Chromium and open a page, wiring console-error + /api/ response capture.
+ * Launch Chromium and open a page. Keeps the console errors, the page errors and the HTTP errors.
  * Records a webm to `outDir` unless `record: false`. Returns the browser/context/
  * page plus the capture arrays and a `close()` that finalizes the video.
  */
@@ -64,20 +79,22 @@ export async function openSession({
   });
   const page = await ctx.newPage();
   const consoleErrors = [];
-  const apiResponses = [];
+  const pageErrors = [];
+  const httpErrors = [];
   page.on('console', (m) => {
     if (m.type() === 'error') consoleErrors.push(m.text());
   });
+  page.on('pageerror', (error) => pageErrors.push(String(error)));
   page.on('response', (r) => {
-    const url = r.url();
-    if (url.includes('/api/')) apiResponses.push({ status: r.status(), method: r.request().method(), url });
+    if (r.status() >= 400) httpErrors.push({ status: r.status(), method: r.request().method(), url: r.url() });
   });
   return {
     browser,
     ctx,
     page,
     consoleErrors,
-    apiResponses,
+    pageErrors,
+    httpErrors,
     async close() {
       await ctx.close(); // finalizes recordVideo
       await browser.close();
@@ -120,7 +137,7 @@ export async function devLogin(page, opts = {}) {
     method,
     ...(payload ? { data: payload } : {}),
   });
-  if (!res.ok()) throw new Error(`test-feature-pw: dev login ${method} ${path} returned ${res.status()}`);
+  if (!res.ok()) throw new Error(`test-feature: dev login ${method} ${path} returned ${res.status()}`);
 }
 
 /**
